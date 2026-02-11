@@ -1,15 +1,16 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import HeartNote from '../components/HeartNote';
 import CreateModal from '../components/CreateModal';
-// 1. IMPORT THE COMPONENT
-import FallingHearts from '../components/FallingHearts'; 
+import FallingHearts from '../components/FallingHearts';
 
+// 1. Add 'rotation' to the Note interface
 interface Note {
   id: number;
   message: string;
   nickname: string;
   date: string;
+  rotation: number; // Stores the tilt angle
 }
 
 interface NoteInput {
@@ -20,21 +21,30 @@ interface NoteInput {
 export default function ValentinesBoard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+
   const [notes, setNotes] = useState<Note[]>([
     {
       id: 1,
       message: "Happy Valentine's Day to everyone!",
       nickname: "Admin",
-      date: "2/14/2026" // Fixed static date to prevent hydration error
+      date: "2/14/2026",
+      rotation: -5 // Hardcoded tilt for the first note
     }
   ]);
+
+  // Helper function to get a random number between -20 and 40
+  const getRandomRotation = () => {
+    // Returns a number between -15 and 15
+    return Math.floor(Math.random() * 30) - 20;
+  };
 
   const addNote = ({ message, nickname }: NoteInput) => {
     const newNote: Note = {
       id: Date.now(),
       message,
       nickname,
-      date: new Date().toLocaleDateString()
+      date: new Date().toLocaleDateString(),
+      rotation: getRandomRotation() // Generate random tilt when creating note
     };
     setNotes([newNote, ...notes]);
   };
@@ -42,8 +52,6 @@ export default function ValentinesBoard() {
   return (
     <main className="min-h-screen bg-pink-50 relative overflow-x-hidden">
       
-      {/* 2. USE THE COMPONENT HERE */}
-      {/* This renders the background behind everything else */}
       <FallingHearts />
 
       <header className="py-8 text-center relative z-10">
@@ -64,6 +72,7 @@ export default function ValentinesBoard() {
                 message={note.message}
                 nickname={note.nickname}
                 date={note.date}
+                rotation={note.rotation} // Pass the rotation down
               />
             ))}
           </div>
