@@ -1,87 +1,429 @@
-'use client';
-import React, { useState } from 'react';
-import HeartNote from '../components/HeartNote';
-import CreateModal from '../components/CreateModal';
-// 1. IMPORT THE COMPONENT
-import FallingHearts from '../components/FallingHearts'; 
+"use client";
 
-interface Note {
-  id: number;
-  message: string;
-  nickname: string;
-  date: string;
+import { useLayoutEffect, useEffect, useRef, useState } from "react";
+import Header from "@/components/Header";
+import Canvas from "@/components/Canvas";
+import Toolbar from "@/components/Toolbar";
+import ZoomControls from "@/components/Zoomcontrols";
+import ShareButton from "@/components/ShareButton";
+import FallingHeartsBackground from "@/components/FallingHeartsBackground";
+import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
+import MusicPlaySection from "@/components/MusicPlaySection";
+import { Note } from "@/types/note";
+
+const PASTEL_COLORS = [
+  "#FFB3BA", // Light pink
+  "#F95579", // Light peach
+  "#FF8AB3", // Light yellow
+  // "#BAFFC9", // Light mint
+  // "#BAE1FF", // Light blue
+  // "#E0BBE4", // Light lavender
+  "#FFC4DD", // Light rose
+  "#FFE5E5", // Pale pink
+];
+
+// Must match StickyNote sizing (w-48 h-48 => 192px if base font-size is 16px)
+const NOTE_W = 240;
+const NOTE_H = 200;
+
+// Allow up to 2px overlap in BOTH axes; more than that is considered "overlapping too much"
+const MAX_OVERLAP_PX = 2;
+
+type RectPx = { left: number; top: number; right: number; bottom: number };
+type NotePatch = Partial<
+  Pick<Note, "author" | "to" | "content" | "color" | "x" | "y" | "rotation">
+>;
+type CanvasSize = { width: number; height: number };
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
-interface NoteInput {
-  message: string;
-  nickname: string;
+function rectsOverlapMoreThan(a: RectPx, b: RectPx, maxOverlapPx: number) {
+  const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+
+  // If they overlap by more than maxOverlapPx in BOTH directions,
+  // then they overlap too much (area overlap bigger than a thin "stacking" edge).
+  return overlapX > maxOverlapPx && overlapY > maxOverlapPx;
 }
 
-export default function ValentinesBoard() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+function noteToRectPx(note: Note, canvas: CanvasSize): RectPx {
+  const left = (note.x / 100) * canvas.width;
+  const top = (note.y / 100) * canvas.height;
+  return {
+    left,
+    top,
+    right: left + NOTE_W,
+    bottom: top + NOTE_H,
+  };
+}
 
-  const [notes, setNotes] = useState<Note[]>([
-    {
-      id: 1,
-      message: "Happy Valentine's Day to everyone!",
-      nickname: "Admin",
-      date: "2/14/2026" // Fixed static date to prevent hydration error
-    }
-  ]);
+function candidateToRectPx(xPx: number, yPx: number): RectPx {
+  return { left: xPx, top: yPx, right: xPx + NOTE_W, bottom: yPx + NOTE_H };
+}
 
-  const addNote = ({ message, nickname }: NoteInput) => {
-    const newNote: Note = {
-      id: Date.now(),
-      message,
-      nickname,
-      date: new Date().toLocaleDateString()
-    };
-    setNotes([newNote, ...notes]);
+function findNonOverlappingPositionPx(
+  existingNotes: Note[],
+  canvas: CanvasSize,
+): { xPx: number; yPx: number } {
+  const maxX = canvas.width - NOTE_W;
+  const maxY = canvas.height - NOTE_H;
+
+  if (maxX <= 0 || maxY <= 0) return { xPx: 0, yPx: 0 };
+
+  const existingRects = existingNotes.map((n) => noteToRectPx(n, canvas));
+
+  const fits = (xPx: number, yPx: number) => {
+    const rect = candidateToRectPx(xPx, yPx);
+    return !existingRects.some((r) =>
+      rectsOverlapMoreThan(rect, r, MAX_OVERLAP_PX),
+    );
   };
 
+  // 1) Try a spiral-ish search around center (feels natural)
+  const centerX = clamp(canvas.width / 2 - NOTE_W / 2, 0, maxX);
+  const centerY = clamp(canvas.height / 2 - NOTE_H / 2, 0, maxY);
+
+  const STEP = 24;
+  const maxR = Math.hypot(canvas.width, canvas.height);
+
+  if (fits(centerX, centerY)) return { xPx: centerX, yPx: centerY };
+
+  for (let r = STEP; r <= maxR; r += STEP) {
+    for (let k = 0; k < 8; k++) {
+      const angle = (Math.PI * 2 * k) / 8;
+      const x = clamp(centerX + r * Math.cos(angle), 0, maxX);
+      const y = clamp(centerY + r * Math.sin(angle), 0, maxY);
+      if (fits(x, y)) return { xPx: x, yPx: y };
+    }
+  }
+
+  // 2) Fallback: grid scan (top-left → bottom-right)
+  for (let y = 0; y <= maxY; y += STEP) {
+    for (let x = 0; x <= maxX; x += STEP) {
+      if (fits(x, y)) return { xPx: x, yPx: y };
+    }
+  }
+
+  return { xPx: centerX, yPx: centerY };
+}
+
+export default function ValentinesNotesPage() {
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [draggedNote, setDraggedNote] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  const draggedNoteRef = useRef<string | null>(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [burst, setBurst] = useState<NoteBurst>(null);
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const [selectedColor, setSelectedColor] = useState(PASTEL_COLORS[0]);
+  const [pendingCreate, setPendingCreate] = useState(false);
+
+  // Zoom
+  const [zoom, setZoom] = useState(1);
+  const MIN_ZOOM = 0.6;
+  const MAX_ZOOM = 1.8;
+  const ZOOM_STEP = 0.1;
+
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [baseSize, setBaseSize] = useState<CanvasSize>({ width: 0, height: 0 });
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  const getCanvasSize = (): CanvasSize => {
+    const vp = viewportRef.current;
+    const w = vp?.clientWidth ?? baseSize.width;
+    const h = vp?.clientHeight ?? baseSize.height;
+    return {
+      width: w > 0 ? w : 1000,
+      height: h > 0 ? h : 700,
+    };
+  };
+
+  const measureViewport = () => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    // getBoundingClientRect is stable (not tied to scrollbar toggling like clientWidth)
+    const r = el.getBoundingClientRect();
+    setBaseSize({ width: Math.round(r.width), height: Math.round(r.height) });
+  };
+
+  useLayoutEffect(() => {
+    measureViewport();
+
+    const onResize = () => measureViewport();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // useLayoutEffect(() => {
+  //   const el = viewportRef.current;
+  //   if (!el) return;
+
+  //   const set = () =>
+  //     setBaseSize({ width: el.clientWidth, height: el.clientHeight });
+
+  //   set();
+
+  //   const ro = new ResizeObserver(() => set());
+  //   ro.observe(el);
+
+  //   window.addEventListener("resize", set);
+  //   return () => {
+  //     ro.disconnect();
+  //     window.removeEventListener("resize", set);
+  //   };
+  // }, []);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const id = draggedNoteRef.current;
+      if (!id || !canvasRef.current) return;
+
+      const rect = canvasRef.current.getBoundingClientRect();
+      const off = dragOffsetRef.current;
+
+      const newX = ((e.clientX - off.x - rect.left) / rect.width) * 100;
+      const newY = ((e.clientY - off.y - rect.top) / rect.height) * 100;
+
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? { ...n, x: clamp(newX, 0, 95), y: clamp(newY, 0, 95) }
+            : n,
+        ),
+      );
+    };
+
+    const onUp = () => {
+      if (!draggedNoteRef.current) return;
+      draggedNoteRef.current = null;
+      setDraggedNote(null);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const keepViewCenteredWhileZooming = (nextZoom: number) => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+
+    const vw = vp.clientWidth;
+    const vh = vp.clientHeight;
+
+    // current center in "unscaled world pixels"
+    const centerX = (vp.scrollLeft + vw / 2) / zoom;
+    const centerY = (vp.scrollTop + vh / 2) / zoom;
+
+    // update zoom, then re-center after layout paints
+    setZoom(nextZoom);
+
+    requestAnimationFrame(() => {
+      vp.scrollLeft = centerX * nextZoom - vw / 2;
+      vp.scrollTop = centerY * nextZoom - vh / 2;
+    });
+  };
+
+  const zoomIn = () =>
+    keepViewCenteredWhileZooming(clamp(zoom + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM));
+  const zoomOut = () =>
+    keepViewCenteredWhileZooming(clamp(zoom - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM));
+  const zoomReset = () => keepViewCenteredWhileZooming(1);
+
+  const updateNote = (noteId: string, patch: NotePatch) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, ...patch } : n)),
+    );
+  };
+
+  const addNote = () => {
+    if (editingNoteId) return;
+    setPendingCreate(true);
+    setIsColorPickerOpen(true);
+  };
+
+  const createNoteWithColor = (color: string) => {
+    const id = Date.now().toString();
+
+    const canvasSize = getCanvasSize();
+
+    // Center-first placement (your function already starts at center)
+    const placement = findNonOverlappingPositionPx(notes, canvasSize);
+
+    const x = (placement.xPx / canvasSize.width) * 100;
+    const y = (placement.yPx / canvasSize.height) * 100;
+
+    const newNote: Note = {
+      id,
+      author: "",
+      to: "",
+      content: "",
+      color,
+      x: clamp(x, 0, 95),
+      y: clamp(y, 0, 95),
+      rotation: Math.random() * 10 - 5,
+    };
+
+    setNotes((prev) => [...prev, newNote]);
+    setEditingNoteId(id);
+  };
+
+  const updateNoteContent = (noteId: string, content: string) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, content } : n)),
+    );
+  };
+
+  const deleteNote = (noteId: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    if (editingNoteId === noteId) setEditingNoteId(null);
+  };
+
+  const finishEdit = (noteId: string) => {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note) return;
+
+    if (!note.content.trim()) {
+      deleteNote(noteId);
+      return;
+    }
+
+    setEditingNoteId(null);
+
+    // Burst aligns better if it's rendered inside the same zoomed canvas wrapper (below).
+    setBurst({ xPct: note.x, yPct: note.y, key: Date.now() });
+    setTimeout(() => setBurst(null), 800);
+  };
+
+  const cancelEdit = (noteId: string) => deleteNote(noteId);
+
+  const selectColor = (color: string) => {
+    setSelectedColor(color);
+
+    if (pendingCreate) {
+      createNoteWithColor(color);
+      setPendingCreate(false);
+      setIsColorPickerOpen(false);
+      return;
+    }
+
+    if (editingNoteId) {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === editingNoteId ? { ...n, color } : n)),
+      );
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
+    if (editingNoteId === noteId) return;
+
+    const note = notes.find((n) => n.id === noteId);
+    if (!note || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const noteX = (note.x / 100) * rect.width;
+    const noteY = (note.y / 100) * rect.height;
+
+    const offset = { x: e.clientX - noteX, y: e.clientY - noteY };
+
+    setDragOffset(offset);
+    dragOffsetRef.current = offset;
+
+    setDraggedNote(noteId);
+    draggedNoteRef.current = noteId;
+  };
+
+  const handleMouseMove = (_e: React.MouseEvent) => {};
+  const handleMouseUp = () => {
+    draggedNoteRef.current = null;
+    setDraggedNote(null);
+  };
+
+  const worldW = baseSize.width > 0 ? baseSize.width : getCanvasSize().width;
+  const worldH = baseSize.height > 0 ? baseSize.height : getCanvasSize().height;
+
   return (
-    <main className="min-h-screen bg-pink-50 relative overflow-x-hidden">
-      
-      {/* 2. USE THE COMPONENT HERE */}
-      {/* This renders the background behind everything else */}
-      <FallingHearts />
+    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-red-50">
+      <Header />
 
-      <header className="py-8 text-center relative z-10">
-        <h1 className="text-4xl md:text-5xl font-extrabold text-pink-600 drop-shadow-sm">
-          Valentine's Wall 💖
-        </h1>
-        <p className="text-pink-400 mt-2">Spread the love anonymously!</p>
-      </header>
+      <FallingHeartsBackground />
 
-      <div className="container mx-auto px-4 pb-24 relative z-10">
-        {notes.length === 0 ? (
-          <p className="text-center text-gray-400 mt-10">No notes yet. Be the first!</p>
-        ) : (
-          <div className="flex flex-wrap justify-center gap-4">
-            {notes.map((note) => (
-              <HeartNote 
-                key={note.id}
-                message={note.message}
-                nickname={note.nickname}
-                date={note.date}
-              />
-            ))}
+      {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
+      <div
+        ref={viewportRef}
+        className="absolute inset-0 overflow-auto z-20"
+        style={{
+          // prevents layout shift when scrollbars appear/disappear
+          scrollbarGutter: "stable",
+        }}
+      >
+        <div
+          className="relative"
+          style={{
+            width: `${worldW * zoom}px`,
+            height: `${worldH * zoom}px`,
+          }}
+        >
+          <div
+            className="absolute left-0 top-0"
+            style={{
+              width: `${worldW}px`,
+              height: `${worldH}px`,
+              transform: `scale(${zoom})`,
+              transformOrigin: "top left",
+              willChange: "transform",
+            }}
+          >
+            <NoteHeartsBurst burst={burst} />
+
+            <Canvas
+              ref={canvasRef}
+              notes={notes}
+              editingNoteId={editingNoteId}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseDown={handleMouseDown}
+              onDeleteNote={deleteNote}
+              onUpdateNote={updateNote}
+              onFinishEdit={finishEdit}
+              onCancelEdit={cancelEdit}
+            />
           </div>
-        )}
+        </div>
       </div>
 
-      <button
-        onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-8 right-8 bg-pink-600 text-white w-16 h-16 rounded-full shadow-lg hover:bg-pink-700 hover:scale-110 transition-all duration-300 flex items-center justify-center text-4xl pb-2 z-40"
-      >
-        +
-      </button>
-
-      <CreateModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSubmit={addNote} 
+      <Toolbar
+        onAddNote={addNote}
+        colors={PASTEL_COLORS}
+        selectedColor={selectedColor}
+        isColorPickerOpen={isColorPickerOpen}
+        onSelectColor={selectColor}
+        onCloseColorPicker={() => {
+          setIsColorPickerOpen(false);
+          setPendingCreate(false);
+        }}
       />
-    </main>
+
+      <ZoomControls
+        zoom={zoom}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onReset={zoomReset}
+      />
+
+      <MusicPlaySection />
+    </div>
   );
 }
