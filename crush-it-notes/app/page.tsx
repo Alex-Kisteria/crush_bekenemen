@@ -355,20 +355,20 @@ export default function ValentinesNotesPage() {
     };
 
     const sendPosition = async (id: string, x: number, y: number) => {
+      // Try to send position update (will fail silently if not owner)
       const token = getEditToken(id);
-      if (!token) return;
 
       try {
         await fetch(`/api/notes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            editToken: token,
+            editToken: token || "guest", // Send placeholder if not owner
             patch: { x, y },
           }),
         });
       } catch {
-        // ignore
+        // Fail silently - note will snap back via realtime if not authorized
       }
     };
 
@@ -376,7 +376,6 @@ export default function ValentinesNotesPage() {
       const id = draggedNoteRef.current;
       if (!id || !canvasRef.current) return;
 
-      // mark as a "real drag" once we exceed a small threshold
       if (!didDragMoveRef.current && dragStartMouseRef.current) {
         const dx = e.clientX - dragStartMouseRef.current.x;
         const dy = e.clientY - dragStartMouseRef.current.y;
@@ -712,9 +711,7 @@ export default function ValentinesNotesPage() {
   // };
 
   const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
-    const token = getEditToken(noteId);
-    if (!token) return; // only owner can drag
-
+    // Remove ownership check - allow everyone to drag
     const note = notesRef.current.find((n) => n.id === noteId);
     if (!note || !canvasRef.current) return;
 

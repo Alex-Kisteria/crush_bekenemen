@@ -17,6 +17,7 @@ export default function NoteDetailsModal({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [showContent, setShowContent] = useState(false);
 
   const authorLabel = useMemo(() => {
     const a = (note?.author ?? "").trim();
@@ -31,8 +32,12 @@ export default function NoteDetailsModal({
   useEffect(() => {
     if (isOpen) {
       setIsAnimating(true);
+      // Delay content animation slightly after modal entrance
+      const timer = setTimeout(() => setShowContent(true), 200);
+      return () => clearTimeout(timer);
     } else {
-      const timer = setTimeout(() => setIsAnimating(false), 300);
+      setShowContent(false);
+      const timer = setTimeout(() => setIsAnimating(false), 500);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
@@ -102,7 +107,8 @@ export default function NoteDetailsModal({
   return (
     <div
       className={[
-        "fixed inset-0 z-[60] flex items-center justify-center p-4 transition-all duration-300",
+        "fixed inset-0 z-[60] flex items-center justify-center p-4",
+        "transition-all duration-400 ease-out",
         isOpen
           ? "bg-black/5 backdrop-blur-xs"
           : "bg-black/0 backdrop-blur-none pointer-events-none",
@@ -114,31 +120,68 @@ export default function NoteDetailsModal({
       <div
         className={[
           "w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden",
-          "transition-all duration-300 ease-out",
-          isOpen
-            ? "opacity-100 scale-100 translate-y-0"
-            : "opacity-0 scale-95 translate-y-4",
+          "transition-all duration-500",
+          isAnimating && isOpen
+            ? "opacity-100 scale-100"
+            : "opacity-0 scale-95",
         ].join(" ")}
         style={{
           backgroundColor: note?.color ?? "#FFE5E5",
           outline: "none",
-          transform: `rotate(${(note?.rotation ?? 0) * 0.3}deg)`,
+          transform:
+            isAnimating && isOpen
+              ? `rotate(${(note?.rotation ?? 0) * 0.3}deg)`
+              : `rotate(${(note?.rotation ?? 0) * 0.3 - 2}deg) scale(0.95) translateY(20px)`,
+          transitionTimingFunction: isOpen
+            ? "cubic-bezier(0.34, 1.56, 0.64, 1)"
+            : "cubic-bezier(0.4, 0, 1, 1)",
         }}
       >
         {/* Sticky note header with tape effect */}
         <div className="relative px-6 pt-6 pb-4">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-8 bg-white/30 rounded-b-lg border-t-2 border-white/50" />
+          <div
+            className={[
+              "absolute top-0 left-1/2 -translate-x-1/2 w-20 h-8 bg-white/30 rounded-b-lg border-t-2 border-white/50",
+              "transition-all duration-500",
+              showContent
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 -translate-y-3",
+            ].join(" ")}
+            style={{
+              transitionDelay: showContent ? "200ms" : "0ms",
+            }}
+          />
 
           <button
             type="button"
             onClick={onClose}
-            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-rose-400/80 text-white flex items-center justify-center hover:bg-rose-500 transition-colors shadow-md z-10"
+            className={[
+              "absolute top-3 right-3 w-8 h-8 rounded-full bg-rose-400/80 text-white flex items-center justify-center hover:bg-rose-500 transition-all shadow-md z-10",
+              "duration-400",
+              showContent
+                ? "opacity-100 scale-100 rotate-0"
+                : "opacity-0 scale-0 rotate-180",
+            ].join(" ")}
+            style={{
+              transitionDelay: showContent ? "300ms" : "0ms",
+            }}
             title="Close"
           >
             ×
           </button>
 
-          <div className="text-gray-800 font-note text-sm leading-tight pt-4">
+          <div
+            className={[
+              "text-gray-800 font-note text-sm leading-tight pt-4",
+              "transition-all duration-500",
+              showContent
+                ? "opacity-100 translate-x-0"
+                : "opacity-0 -translate-x-6",
+            ].join(" ")}
+            style={{
+              transitionDelay: showContent ? "150ms" : "0ms",
+            }}
+          >
             <div className="flex items-center gap-2 mb-1">
               <span className="opacity-70 font-semibold">From:</span>
               <span className="font-semibold">{authorLabel}</span>
@@ -152,7 +195,18 @@ export default function NoteDetailsModal({
 
         <div className="px-6 pb-6">
           {/* Message content */}
-          <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 mb-4 border border-black/5 shadow-inner">
+          <div
+            className={[
+              "bg-white/40 backdrop-blur-sm rounded-2xl p-4 mb-4 border border-black/5 shadow-inner",
+              "transition-all duration-500",
+              showContent
+                ? "opacity-100 translate-y-0 scale-100"
+                : "opacity-0 translate-y-6 scale-95",
+            ].join(" ")}
+            style={{
+              transitionDelay: showContent ? "250ms" : "0ms",
+            }}
+          >
             <div className="text-gray-800 font-note text-base whitespace-pre-wrap break-words max-h-[250px] overflow-auto">
               {note?.content}
             </div>
@@ -162,9 +216,31 @@ export default function NoteDetailsModal({
           {(note?.trackId ||
             note?.trackPreviewUrl ||
             note?.trackSpotifyUrl) && (
-            <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner">
+            <div
+              className={[
+                "bg-white/50 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner",
+                "transition-all duration-500",
+                showContent
+                  ? "opacity-100 translate-y-0 scale-100"
+                  : "opacity-0 translate-y-8 scale-95",
+              ].join(" ")}
+              style={{
+                transitionDelay: showContent ? "350ms" : "0ms",
+              }}
+            >
               <div className="flex items-center gap-3 mb-3">
-                {/* <div className="w-14 h-14 rounded-xl overflow-hidden bg-white border border-rose-100 flex items-center justify-center shrink-0 shadow-md">
+                <div
+                  className={[
+                    "w-14 h-14 rounded-xl overflow-hidden bg-white border border-rose-100 flex items-center justify-center shrink-0 shadow-md",
+                    "transition-all duration-600",
+                    showContent
+                      ? "opacity-100 scale-100 rotate-0"
+                      : "opacity-0 scale-50 -rotate-45",
+                  ].join(" ")}
+                  style={{
+                    transitionDelay: showContent ? "450ms" : "0ms",
+                  }}
+                >
                   {note.trackImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -175,18 +251,29 @@ export default function NoteDetailsModal({
                   ) : (
                     <div className="text-xs text-rose-700/60">No img</div>
                   )}
-                </div> */}
+                </div>
 
-                {/* <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1">
                   <div className="text-rose-950 font-semibold text-sm truncate">
                     {note.trackName ?? "Song"}
                   </div>
                   <div className="text-rose-900/70 text-xs truncate">
                     {note.trackArtists ?? ""}
                   </div>
-                </div> */}
+                </div>
 
-                <div className="flex items-center gap-2">
+                <div
+                  className={[
+                    "flex items-center gap-2",
+                    "transition-all duration-500",
+                    showContent
+                      ? "opacity-100 translate-x-0"
+                      : "opacity-0 translate-x-8",
+                  ].join(" ")}
+                  style={{
+                    transitionDelay: showContent ? "500ms" : "0ms",
+                  }}
+                >
                   {note.trackPreviewUrl && (
                     <>
                       <button
@@ -217,7 +304,18 @@ export default function NoteDetailsModal({
 
               {/* Spotify Embed */}
               {note.trackId && (
-                <div className="rounded-xl overflow-hidden shadow-md">
+                <div
+                  className={[
+                    "rounded-xl overflow-hidden shadow-md",
+                    "transition-all duration-600",
+                    showContent
+                      ? "opacity-100 scale-100"
+                      : "opacity-0 scale-90",
+                  ].join(" ")}
+                  style={{
+                    transitionDelay: showContent ? "550ms" : "0ms",
+                  }}
+                >
                   <iframe
                     title="Spotify Player"
                     src={`https://open.spotify.com/embed/track/${note.trackId}`}
@@ -240,8 +338,17 @@ export default function NoteDetailsModal({
           )}
         </div>
 
-        {/* Decorative shadow lines at bottom to enhance sticky note effect */}
-        <div className="h-3 bg-gradient-to-b from-transparent to-black/5" />
+        {/* Decorative shadow lines at bottom */}
+        <div
+          className={[
+            "h-3 bg-gradient-to-b from-transparent to-black/5",
+            "transition-opacity duration-500",
+            showContent ? "opacity-100" : "opacity-0",
+          ].join(" ")}
+          style={{
+            transitionDelay: showContent ? "600ms" : "0ms",
+          }}
+        />
       </div>
     </div>
   );

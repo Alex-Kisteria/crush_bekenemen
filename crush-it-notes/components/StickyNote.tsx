@@ -88,7 +88,7 @@ export default function StickyNote({
 
   // Combine scales: pluck + filter fade
   const baseScale = pluck ? 1.08 : 1;
-  const filterScale = isVisible ? 1 : 0.88; // More dramatic scale change
+  const filterScale = isVisible ? 1 : 0.88;
   const finalScale = baseScale * filterScale;
 
   return (
@@ -96,15 +96,13 @@ export default function StickyNote({
       className={[
         "absolute w-[240px] h-[200px] p-4 rounded-xl group",
         "shadow-lg hover:shadow-2xl",
-        // Much slower, more noticeable transition (800ms)
         "transition-[opacity,transform,filter,shadow] duration-[800ms] ease-in-out",
         isVisible ? "opacity-100" : "opacity-0",
         isVisible ? "blur-0" : "blur-[2px]",
-        // Reduce shadow when hidden
         isVisible ? "" : "shadow-none",
-        // Disable interaction when filtered out
         isVisible ? "pointer-events-auto" : "pointer-events-none",
-        isOwner ? "cursor-move" : "cursor-pointer",
+        // Everyone can drag now
+        "cursor-move",
       ].join(" ")}
       style={{
         left: `${note.x}%`,
@@ -112,7 +110,6 @@ export default function StickyNote({
         backgroundColor: note.color,
         transform: `rotate(${note.rotation}deg) scale(${finalScale}) translateY(${isVisible ? 0 : 8}px)`,
         willChange: "transform, opacity, filter",
-        // Add a slight color desaturation when hidden
         filter: isVisible ? "none" : "blur(2px) saturate(0.4) brightness(0.9)",
       }}
       aria-hidden={!isVisible}
@@ -126,10 +123,9 @@ export default function StickyNote({
           time: Date.now(),
         };
 
-        if (isOwner) {
-          e.preventDefault();
-          onMouseDown(e, note.id);
-        }
+        // Allow everyone to drag (removed isOwner check)
+        e.preventDefault();
+        onMouseDown(e, note.id);
       }}
       onMouseUp={(e) => {
         if (!isVisible) return;
@@ -153,6 +149,7 @@ export default function StickyNote({
         clickStartRef.current = null;
       }}
     >
+      {/* Delete button only visible for owners */}
       {isOwner && (
         <button
           onMouseDown={(e) => e.stopPropagation()}
@@ -225,7 +222,7 @@ export default function StickyNote({
                   href={note.trackSpotifyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2 py-1 rounded-lg text-[11px] bg-white/70 border border-rose-600/20 hover:bg-rose-50"
+                  className="px-2 py-1 rounded-lg text-[11px] text-rose-400/60 bg-white/70 border border-rose-600/20 hover:bg-rose-50"
                 >
                   Open
                 </a>
