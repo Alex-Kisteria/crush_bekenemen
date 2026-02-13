@@ -15,10 +15,20 @@ function sha256Hex(s: string) {
   return crypto.createHash("sha256").update(s).digest("hex");
 }
 
+function asTextOrNull(v: unknown, maxLen: number) {
+  if (v === null || v === undefined) return null;
+  const s = String(v);
+  if (!s.trim()) return null;
+  return s.length > maxLen ? s.slice(0, maxLen) : s;
+}
+
+const NOTE_SELECT =
+  "id, author, to_name, content, color, x, y, rotation, track_id, track_name, track_artists, track_image, track_preview_url, track_spotify_url, created_at, updated_at";
+
 export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("notes")
-    .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
+    .select(NOTE_SELECT)
     .order("created_at", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -48,6 +58,14 @@ export async function POST(req: Request) {
     );
   }
 
+  // Optional music fields (null if not provided)
+  const track_id = asTextOrNull(body.track_id, 64);
+  const track_name = asTextOrNull(body.track_name, 200);
+  const track_artists = asTextOrNull(body.track_artists, 200);
+  const track_image = asTextOrNull(body.track_image, 500);
+  const track_preview_url = asTextOrNull(body.track_preview_url, 500);
+  const track_spotify_url = asTextOrNull(body.track_spotify_url, 500);
+
   const note = {
     id,
     author: String(body.author ?? ""),
@@ -57,13 +75,20 @@ export async function POST(req: Request) {
     x: clamp(xRaw, 0, 95),
     y: clamp(yRaw, 0, 95),
     rotation: rotRaw,
+
+    track_id,
+    track_name,
+    track_artists,
+    track_image,
+    track_preview_url,
+    track_spotify_url,
   };
 
   // Insert note
   const { data, error } = await supabaseAdmin
     .from("notes")
     .insert(note)
-    .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
+    .select(NOTE_SELECT)
     .single();
 
   if (!error && data) {
@@ -94,7 +119,7 @@ export async function POST(req: Request) {
     if (existingTok?.token_hash === sha256Hex(editToken)) {
       const { data: existingNote } = await supabaseAdmin
         .from("notes")
-        .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
+        .select(NOTE_SELECT)
         .eq("id", id)
         .single();
 

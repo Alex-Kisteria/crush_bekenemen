@@ -5,10 +5,9 @@ import Header from "@/components/Header";
 import Canvas from "@/components/Canvas";
 import Toolbar from "@/components/Toolbar";
 import ZoomControls from "@/components/Zoomcontrols";
-import ShareButton from "@/components/ShareButton";
 import FallingHeartsBackground from "@/components/FallingHeartsBackground";
 import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
-import MusicPlaySection from "@/components/MusicPlaySection";
+import CreateNoteModal from "@/components/Createnotemodal";
 import { Note } from "@/types/note";
 import {
   getEditToken,
@@ -124,6 +123,14 @@ type ApiNote = {
   x: number;
   y: number;
   rotation: number;
+
+  track_id?: string | null;
+  track_name?: string | null;
+  track_artists?: string | null;
+  track_image?: string | null;
+  track_preview_url?: string | null;
+  track_spotify_url?: string | null;
+
   created_at?: string;
   updated_at?: string;
 };
@@ -138,10 +145,27 @@ function apiToUi(n: ApiNote): Note {
     x: n.x,
     y: n.y,
     rotation: n.rotation,
+
+    trackId: n.track_id ?? null,
+    trackName: n.track_name ?? null,
+    trackArtists: n.track_artists ?? null,
+    trackImage: n.track_image ?? null,
+    trackPreviewUrl: n.track_preview_url ?? null,
+    trackSpotifyUrl: n.track_spotify_url ?? null,
+
     created_at: n.created_at,
     updated_at: n.updated_at,
   };
 }
+
+type ModalTrack = {
+  id: string;
+  name: string;
+  artists: string;
+  image: string | null;
+  previewUrl: string | null;
+  spotifyUrl: string;
+};
 
 export default function ValentinesNotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -149,19 +173,22 @@ export default function ValentinesNotesPage() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
-  const postingRef = useRef<Set<string>>(new Set());
-  const [postingNoteId, setPostingNoteId] = useState<string | null>(null);
-  const [draggedNote, setDraggedNote] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [burst, setBurst] = useState<NoteBurst>(null);
 
+  // Create Note modal state
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
+
+  const [draftAuthor, setDraftAuthor] = useState("");
+  const [draftTo, setDraftTo] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const [draftColor, setDraftColor] = useState(PASTEL_COLORS[0]);
+  const [draftTrack, setDraftTrack] = useState<ModalTrack | null>(null);
+
+  // Dragging state (unchanged)
+  const [draggedNote, setDraggedNote] = useState<string | null>(null);
   const draggedNoteRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
-
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [burst, setBurst] = useState<NoteBurst>(null);
-  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
-  const [selectedColor, setSelectedColor] = useState(PASTEL_COLORS[0]);
-  const [pendingCreate, setPendingCreate] = useState(false);
 
   // Zoom
   const [zoom, setZoom] = useState(1);
@@ -171,7 +198,6 @@ export default function ValentinesNotesPage() {
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const [baseSize, setBaseSize] = useState<CanvasSize>({ width: 0, height: 0 });
-
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const getCanvasSize = (): CanvasSize => {
@@ -228,9 +254,6 @@ export default function ValentinesNotesPage() {
         "postgres_changes",
         { event: "*", schema: "public", table: "notes" },
         (payload) => {
-          // Debug
-          // console.log("[realtime payload]", payload);
-
           const evt = payload.eventType;
 
           if (evt === "INSERT") {
@@ -256,11 +279,8 @@ export default function ValentinesNotesPage() {
             setNotes((prev) => prev.filter((n) => n.id !== row.id));
           }
         },
-      );
-
-    channel.subscribe((status) => {
-      console.log("[realtime notes-live]", status);
-    });
+      )
+      .subscribe();
 
     return () => {
       supabaseBrowser.removeChannel(channel);
@@ -374,15 +394,21 @@ export default function ValentinesNotesPage() {
   };
 
   const addNote = () => {
-    if (editingNoteId) return;
-    setPendingCreate(true);
-    setIsColorPickerOpen(true);
+    setDraftAuthor("");
+    setDraftTo("");
+    setDraftContent("");
+    setDraftColor(PASTEL_COLORS[0]);
+    setDraftTrack(null);
+    setIsCreateOpen(true);
   };
 
-  const createNoteWithColor = (color: string) => {
-    const id = crypto.randomUUID();
+  const postFromModal = async () => {
+    if (isPosting) return;
+    if (!draftContent.trim()) return;
 
-    // Create ownership token immediately (so POST can be safely retried)
+    setIsPosting(true);
+
+    const id = crypto.randomUUID();
     const editToken = crypto.randomUUID();
     setEditToken(id, editToken);
 
@@ -391,103 +417,31 @@ export default function ValentinesNotesPage() {
       notesRef.current,
       canvasSize,
     );
-
-    const x = (placement.xPx / canvasSize.width) * 100;
-    const y = (placement.yPx / canvasSize.height) * 100;
-
-    const newNote: Note = {
-      id,
-      author: "",
-      to: "",
-      content: "",
-      color,
-      x: clamp(x, 0, 95),
-      y: clamp(y, 0, 95),
-      rotation: Math.random() * 10 - 5,
-    };
-
-    setNotes((prev) => [...prev, newNote]);
-    setEditingNoteId(id);
-  };
-
-  const updateNoteContent = (noteId: string, content: string) => {
-    setNotes((prev) =>
-      prev.map((n) => (n.id === noteId ? { ...n, content } : n)),
-    );
-  };
-
-  const deleteNote = async (noteId: string) => {
-    const token = getEditToken(noteId);
-    if (!token) {
-      alert("You can only delete notes you posted on this device/browser.");
-      return;
-    }
-
-    // optimistic UI
-    const prev = notesRef.current;
-    setNotes((p) => p.filter((n) => n.id !== noteId));
-    if (editingNoteId === noteId) setEditingNoteId(null);
+    const x = clamp((placement.xPx / canvasSize.width) * 100, 0, 95);
+    const y = clamp((placement.yPx / canvasSize.height) * 100, 0, 95);
+    const rotation = Math.random() * 10 - 5;
 
     try {
-      const res = await fetch(
-        `/api/notes/${noteId}?editToken=${encodeURIComponent(token)}`,
-        {
-          method: "DELETE",
-        },
-      );
-
-      if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(`DELETE failed (${res.status}): ${msg}`);
-      }
-
-      removeEditToken(noteId);
-    } catch (e) {
-      console.error(e);
-      // rollback if server rejected
-      setNotes(prev);
-    }
-  };
-
-  const finishEdit = async (noteId: string) => {
-    if (postingRef.current.has(noteId)) return;
-
-    const note = notesRef.current.find((n) => n.id === noteId);
-    if (!note) return;
-
-    if (!note.content.trim()) {
-      // discard local-only note
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
-      if (editingNoteId === noteId) setEditingNoteId(null);
-      removeEditToken(noteId);
-      return;
-    }
-
-    const editToken = getEditToken(noteId);
-    if (!editToken) {
-      alert("Missing edit token. Please create a new note again.");
-      return;
-    }
-
-    postingRef.current.add(noteId);
-    setPostingNoteId(noteId);
-
-    try {
-      // POST creates note and returns editToken
       const res = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: note.id,
-          editToken, // <-- important
+          id,
+          editToken,
+          author: draftAuthor,
+          to_name: draftTo,
+          content: draftContent,
+          color: draftColor,
+          x,
+          y,
+          rotation,
 
-          author: note.author,
-          to_name: note.to,
-          content: note.content,
-          color: note.color,
-          x: note.x,
-          y: note.y,
-          rotation: note.rotation,
+          track_id: draftTrack?.id ?? null,
+          track_name: draftTrack?.name ?? null,
+          track_artists: draftTrack?.artists ?? null,
+          track_image: draftTrack?.image ?? null,
+          track_preview_url: draftTrack?.previewUrl ?? null,
+          track_spotify_url: draftTrack?.spotifyUrl ?? null,
         }),
       });
 
@@ -498,57 +452,187 @@ export default function ValentinesNotesPage() {
 
       const data = (await res.json()) as { note: ApiNote; editToken: string };
 
-      // Keep token (server returns the same one if duplicate+match)
-      if (data.editToken) setEditToken(note.id, data.editToken);
+      // store token (idempotent)
+      if (data.editToken) setEditToken(id, data.editToken);
 
-      // Replace local note with canonical server note
+      // close modal
+      setIsCreateOpen(false);
+
+      // local update (realtime will also insert; this avoids waiting)
       setNotes((prev) =>
-        prev.map((n) => (n.id === note.id ? apiToUi(data.note) : n)),
+        prev.some((n) => n.id === data.note.id)
+          ? prev
+          : [...prev, apiToUi(data.note)],
       );
 
-      setEditingNoteId(null);
-
-      setBurst({ xPct: note.x, yPct: note.y, key: Date.now() });
+      setBurst({ xPct: x, yPct: y, key: Date.now() });
       setTimeout(() => setBurst(null), 800);
     } catch (e) {
       console.error(e);
+      removeEditToken(id);
       alert("Failed to post note. Please try again.");
     } finally {
-      postingRef.current.delete(noteId);
-      setPostingNoteId((current) => (current === noteId ? null : current));
+      setIsPosting(false);
     }
   };
 
-  const cancelEdit = (noteId: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
-    if (editingNoteId === noteId) setEditingNoteId(null);
-  };
+  // const createNoteWithColor = (color: string) => {
+  //   const id = crypto.randomUUID();
 
-  const selectColor = (color: string) => {
-    setSelectedColor(color);
+  //   // Create ownership token immediately (so POST can be safely retried)
+  //   const editToken = crypto.randomUUID();
+  //   setEditToken(id, editToken);
 
-    if (pendingCreate) {
-      createNoteWithColor(color);
-      setPendingCreate(false);
-      setIsColorPickerOpen(false);
-      return;
-    }
+  //   const canvasSize = getCanvasSize();
+  //   const placement = findNonOverlappingPositionPx(
+  //     notesRef.current,
+  //     canvasSize,
+  //   );
 
-    if (editingNoteId) {
-      setNotes((prev) =>
-        prev.map((n) => (n.id === editingNoteId ? { ...n, color } : n)),
-      );
-    }
-  };
+  //   const x = (placement.xPx / canvasSize.width) * 100;
+  //   const y = (placement.yPx / canvasSize.height) * 100;
 
-  const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
-    if (editingNoteId === noteId) return;
+  //   const newNote: Note = {
+  //     id,
+  //     author: "",
+  //     to: "",
+  //     content: "",
+  //     color,
+  //     x: clamp(x, 0, 95),
+  //     y: clamp(y, 0, 95),
+  //     rotation: Math.random() * 10 - 5,
+  //   };
 
+  //   setNotes((prev) => [...prev, newNote]);
+  //   setEditingNoteId(id);
+  // };
+
+  // const updateNoteContent = (noteId: string, content: string) => {
+  //   setNotes((prev) =>
+  //     prev.map((n) => (n.id === noteId ? { ...n, content } : n)),
+  //   );
+  // };
+
+  const deleteNote = async (noteId: string) => {
     const token = getEditToken(noteId);
     if (!token) {
-      // not draggable if you don't own it
+      alert("You can only delete notes you posted on this device/browser.");
       return;
     }
+
+    const prev = notesRef.current;
+    setNotes((p) => p.filter((n) => n.id !== noteId));
+
+    try {
+      const res = await fetch(
+        `/api/notes/${noteId}?editToken=${encodeURIComponent(token)}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!res.ok) throw new Error(`DELETE failed (${res.status})`);
+      removeEditToken(noteId);
+    } catch (e) {
+      console.error(e);
+      setNotes(prev);
+    }
+  };
+
+  // const finishEdit = async (noteId: string) => {
+  //   if (postingRef.current.has(noteId)) return;
+
+  //   const note = notesRef.current.find((n) => n.id === noteId);
+  //   if (!note) return;
+
+  //   if (!note.content.trim()) {
+  //     // discard local-only note
+  //     setNotes((prev) => prev.filter((n) => n.id !== noteId));
+  //     if (editingNoteId === noteId) setEditingNoteId(null);
+  //     removeEditToken(noteId);
+  //     return;
+  //   }
+
+  //   const editToken = getEditToken(noteId);
+  //   if (!editToken) {
+  //     alert("Missing edit token. Please create a new note again.");
+  //     return;
+  //   }
+
+  //   postingRef.current.add(noteId);
+  //   setPostingNoteId(noteId);
+
+  //   try {
+  //     // POST creates note and returns editToken
+  //     const res = await fetch("/api/notes", {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify({
+  //         id: note.id,
+  //         editToken, // <-- important
+
+  //         author: note.author,
+  //         to_name: note.to,
+  //         content: note.content,
+  //         color: note.color,
+  //         x: note.x,
+  //         y: note.y,
+  //         rotation: note.rotation,
+  //       }),
+  //     });
+
+  //     if (!res.ok) {
+  //       const msg = await res.text().catch(() => "");
+  //       throw new Error(`POST /api/notes failed (${res.status}): ${msg}`);
+  //     }
+
+  //     const data = (await res.json()) as { note: ApiNote; editToken: string };
+
+  //     // Keep token (server returns the same one if duplicate+match)
+  //     if (data.editToken) setEditToken(note.id, data.editToken);
+
+  //     // Replace local note with canonical server note
+  //     setNotes((prev) =>
+  //       prev.map((n) => (n.id === note.id ? apiToUi(data.note) : n)),
+  //     );
+
+  //     setEditingNoteId(null);
+
+  //     setBurst({ xPct: note.x, yPct: note.y, key: Date.now() });
+  //     setTimeout(() => setBurst(null), 800);
+  //   } catch (e) {
+  //     console.error(e);
+  //     alert("Failed to post note. Please try again.");
+  //   } finally {
+  //     postingRef.current.delete(noteId);
+  //     setPostingNoteId((current) => (current === noteId ? null : current));
+  //   }
+  // };
+
+  // const cancelEdit = (noteId: string) => {
+  //   setNotes((prev) => prev.filter((n) => n.id !== noteId));
+  //   if (editingNoteId === noteId) setEditingNoteId(null);
+  // };
+
+  // const selectColor = (color: string) => {
+  //   setSelectedColor(color);
+
+  //   if (pendingCreate) {
+  //     createNoteWithColor(color);
+  //     setPendingCreate(false);
+  //     setIsColorPickerOpen(false);
+  //     return;
+  //   }
+
+  //   if (editingNoteId) {
+  //     setNotes((prev) =>
+  //       prev.map((n) => (n.id === editingNoteId ? { ...n, color } : n)),
+  //     );
+  //   }
+  // };
+
+  const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
+    const token = getEditToken(noteId);
+    if (!token) return; // only owner can drag
 
     const note = notesRef.current.find((n) => n.id === noteId);
     if (!note || !canvasRef.current) return;
@@ -557,11 +641,7 @@ export default function ValentinesNotesPage() {
     const noteX = (note.x / 100) * rect.width;
     const noteY = (note.y / 100) * rect.height;
 
-    const offset = { x: e.clientX - noteX, y: e.clientY - noteY };
-
-    setDragOffset(offset);
-    dragOffsetRef.current = offset;
-
+    dragOffsetRef.current = { x: e.clientX - noteX, y: e.clientY - noteY };
     setDraggedNote(noteId);
     draggedNoteRef.current = noteId;
   };
@@ -592,10 +672,7 @@ export default function ValentinesNotesPage() {
       >
         <div
           className="relative"
-          style={{
-            width: `${worldW * zoom}px`,
-            height: `${worldH * zoom}px`,
-          }}
+          style={{ width: `${worldW * zoom}px`, height: `${worldH * zoom}px` }}
         >
           <div
             className="absolute left-0 top-0"
@@ -612,31 +689,16 @@ export default function ValentinesNotesPage() {
             <Canvas
               ref={canvasRef}
               notes={notes}
-              editingNoteId={editingNoteId}
-              postingNoteId={postingNoteId}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseDown={handleMouseDown}
               onDeleteNote={deleteNote}
-              onUpdateNote={updateNote}
-              onFinishEdit={finishEdit}
-              onCancelEdit={cancelEdit}
             />
           </div>
         </div>
       </div>
 
-      <Toolbar
-        onAddNote={addNote}
-        colors={PASTEL_COLORS}
-        selectedColor={selectedColor}
-        isColorPickerOpen={isColorPickerOpen}
-        onSelectColor={selectColor}
-        onCloseColorPicker={() => {
-          setIsColorPickerOpen(false);
-          setPendingCreate(false);
-        }}
-      />
+      <Toolbar onAddNote={addNote} />
 
       <ZoomControls
         zoom={zoom}
@@ -647,7 +709,25 @@ export default function ValentinesNotesPage() {
         onReset={zoomReset}
       />
 
-      <MusicPlaySection />
+      <CreateNoteModal
+        isOpen={isCreateOpen}
+        isPosting={isPosting}
+        author={draftAuthor}
+        to={draftTo}
+        content={draftContent}
+        selectedColor={draftColor}
+        colors={PASTEL_COLORS}
+        selectedTrack={draftTrack}
+        onAuthorChange={setDraftAuthor}
+        onToChange={setDraftTo}
+        onContentChange={setDraftContent}
+        onColorChange={setDraftColor}
+        onSelectTrack={setDraftTrack}
+        onClose={() => (isPosting ? null : setIsCreateOpen(false))}
+        onCreate={postFromModal}
+      />
+
+      {/* <MusicPlaySection /> */}
     </div>
   );
 }

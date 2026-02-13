@@ -1,10 +1,15 @@
-import React from 'react';
+import React from "react";
 
-export default function HeartNote({ message, nickname, date }) {
+interface HeartNoteProps {
+  message: string;
+  nickname: string;
+  date: string;
+}
+
+export default function HeartNote({ message, nickname, date }: HeartNoteProps) {
   return (
     // The container for the heart
     <div className="relative w-64 h-64 flex items-center justify-center hover:scale-105 transition-transform duration-300">
-      
       {/* The Background Shape: 
         We use an SVG here because it's easier to put text inside an SVG 
         than purely CSS shapes. It draws a pink heart.
@@ -19,12 +24,11 @@ export default function HeartNote({ message, nickname, date }) {
 
       {/* The Content Area */}
       <div className="relative z-10 w-40 text-center flex flex-col items-center justify-center text-white">
-        
         {/* The Message */}
         <p className="font-medium text-sm break-words line-clamp-4 leading-tight mb-2">
           "{message}"
         </p>
-        
+
         {/* Nickname & Date */}
         <div className="text-xs opacity-90 border-t border-pink-300 pt-1 mt-1">
           <p className="font-bold">~ {nickname}</p>

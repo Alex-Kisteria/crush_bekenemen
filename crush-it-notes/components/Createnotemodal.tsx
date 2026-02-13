@@ -1,37 +1,132 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
+type Track = {
+  id: string;
+  name: string;
+  artists: string;
+  image: string | null;
+  previewUrl: string | null;
+  spotifyUrl: string;
+};
+
 interface CreateNoteModalProps {
   isOpen: boolean;
+  isPosting?: boolean;
+
+  author: string;
+  to: string;
   content: string;
+
   selectedColor: string;
   colors: string[];
+
+  selectedTrack: Track | null;
+
+  onAuthorChange: (author: string) => void;
+  onToChange: (to: string) => void;
   onContentChange: (content: string) => void;
   onColorChange: (color: string) => void;
+
+  onSelectTrack: (track: Track | null) => void;
+
   onClose: () => void;
   onCreate: () => void;
 }
 
 export default function CreateNoteModal({
   isOpen,
+  isPosting = false,
+  author,
+  to,
   content,
   selectedColor,
   colors,
+  selectedTrack,
+  onAuthorChange,
+  onToChange,
   onContentChange,
   onColorChange,
+  onSelectTrack,
   onClose,
   onCreate,
 }: CreateNoteModalProps) {
+  const [query, setQuery] = useState("");
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const canSearch = query.trim().length >= 2;
+
+  const selectedLabel = useMemo(() => {
+    if (!selectedTrack) return "No song selected";
+    return `${selectedTrack.name} — ${selectedTrack.artists}`;
+  }, [selectedTrack]);
+
+  const doSearch = async () => {
+    if (!canSearch) return;
+
+    setLoading(true);
+    setErr(null);
+
+    try {
+      const res = await fetch(
+        `/api/spotify/search?query=${encodeURIComponent(query.trim())}`,
+      );
+      if (!res.ok) throw new Error(`Search failed (${res.status})`);
+      const data = (await res.json()) as { tracks: any[] };
+
+      const mapped: Track[] = (data.tracks ?? []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        artists: t.artists,
+        image: t.image ?? null,
+        previewUrl: t.previewUrl ?? null,
+        spotifyUrl: t.spotifyUrl,
+      }));
+
+      setTracks(mapped);
+    } catch (e: any) {
+      setErr(e?.message ?? "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-3xl shadow-2xl p-8 w-[480px] border border-rose-100">
+    <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 pointer-events-auto">
+      <div className="bg-white rounded-3xl shadow-2xl p-8 w-[520px] border border-rose-100 max-h-[90vh] overflow-auto">
         <h2 className="text-2xl font-bold text-rose-900 mb-6">Create a Note</h2>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <input
+            value={author}
+            onChange={(e) => onAuthorChange(e.target.value)}
+            placeholder="From (optional)"
+            className="w-full p-3 border-2 border-rose-200 rounded-2xl focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
+            disabled={isPosting}
+            style={{ fontFamily: "'Indie Flower', cursive" }}
+          />
+          <input
+            value={to}
+            onChange={(e) => onToChange(e.target.value)}
+            placeholder="To (optional)"
+            className="w-full p-3 border-2 border-rose-200 rounded-2xl focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
+            disabled={isPosting}
+            style={{ fontFamily: "'Indie Flower', cursive" }}
+          />
+        </div>
 
         <textarea
           value={content}
           onChange={(e) => onContentChange(e.target.value)}
           placeholder="Write your message..."
-          className="w-full h-40 p-4 border-2 border-rose-200 rounded-2xl resize-none focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
+          className="w-full h-36 p-4 border-2 border-rose-200 rounded-2xl resize-none focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
           autoFocus
+          disabled={isPosting}
           style={{ fontFamily: "'Indie Flower', cursive" }}
         />
 
@@ -43,8 +138,10 @@ export default function CreateNoteModal({
             {colors.map((color) => (
               <button
                 key={color}
+                type="button"
                 onClick={() => onColorChange(color)}
-                className="w-10 h-10 rounded-lg transition-transform hover:scale-110"
+                disabled={isPosting}
+                className="w-10 h-10 rounded-lg transition-transform hover:scale-110 disabled:opacity-60"
                 style={{
                   backgroundColor: color,
                   border:
@@ -59,26 +156,102 @@ export default function CreateNoteModal({
           </div>
         </div>
 
+        {/* Music attach */}
+        <div className="mt-6">
+          <div className="text-sm font-medium text-rose-900 mb-2">
+            Attach a song (optional)
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") doSearch();
+              }}
+              placeholder="Search Spotify tracks..."
+              className="flex-1 px-3 py-2 rounded-xl border-2 border-rose-200 outline-none focus:border-rose-400 bg-white"
+              disabled={isPosting}
+            />
+            <button
+              type="button"
+              onClick={doSearch}
+              disabled={!canSearch || loading || isPosting}
+              className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold disabled:opacity-50"
+            >
+              {loading ? "..." : "Search"}
+            </button>
+          </div>
+
+          {err && <div className="mt-2 text-sm text-rose-700">{err}</div>}
+
+          <div className="mt-2 text-xs text-rose-800/70">
+            Selected: <span className="font-semibold">{selectedLabel}</span>
+            {selectedTrack && (
+              <button
+                type="button"
+                onClick={() => onSelectTrack(null)}
+                disabled={isPosting}
+                className="ml-2 underline"
+              >
+                clear
+              </button>
+            )}
+          </div>
+
+          <div className="mt-3 max-h-[180px] overflow-auto flex flex-col gap-2">
+            {tracks.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelectTrack(t)}
+                disabled={isPosting}
+                className="w-full text-left p-2 rounded-xl border border-rose-100 hover:bg-rose-50 disabled:opacity-60 flex items-center gap-3"
+              >
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-rose-50 border border-rose-100 flex items-center justify-center">
+                  {t.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={t.image}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-[10px] text-rose-700/60">No img</div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-rose-900 truncate">
+                    {t.name}
+                  </div>
+                  <div className="text-xs text-rose-800/70 truncate">
+                    {t.artists}
+                    {!t.previewUrl ? " • no preview" : ""}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex gap-3 mt-8">
           <button
+            type="button"
             onClick={onClose}
-            className="flex-1 px-6 py-3 border-2 border-rose-300 text-rose-700 rounded-full font-medium hover:bg-rose-50 transition-colors"
+            disabled={isPosting}
+            className="flex-1 px-6 py-3 border-2 border-rose-300 text-rose-700 rounded-full font-medium hover:bg-rose-50 transition-colors disabled:opacity-60"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={onCreate}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-full font-medium hover:scale-105 transition-transform shadow-md"
+            disabled={isPosting}
+            className="flex-1 px-6 py-3 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-full font-medium hover:scale-105 transition-transform shadow-md disabled:opacity-70 disabled:hover:scale-100"
           >
-            Post Note ♡
+            {isPosting ? "..." : "Post Note ♡"}
           </button>
         </div>
-
-        {/* Google Font Import for Indie Flower */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Indie+Flower&display=swap"
-          rel="stylesheet"
-        />
       </div>
     </div>
   );
