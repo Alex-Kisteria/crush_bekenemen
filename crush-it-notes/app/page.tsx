@@ -10,6 +10,11 @@ import FallingHeartsBackground from "@/components/FallingHeartsBackground";
 import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
 import MusicPlaySection from "@/components/MusicPlaySection";
 import { Note } from "@/types/note";
+import {
+  getEditToken,
+  removeEditToken,
+  setEditToken,
+} from "@/lib/noteEditTokens";
 
 const PASTEL_COLORS = [
   "#FFB3BA", // Light pink
@@ -109,8 +114,41 @@ function findNonOverlappingPositionPx(
   return { xPx: centerX, yPx: centerY };
 }
 
+type ApiNote = {
+  id: string;
+  author: string;
+  to_name: string;
+  content: string;
+  color: string;
+  x: number;
+  y: number;
+  rotation: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function apiToUi(n: ApiNote): Note {
+  return {
+    id: n.id,
+    author: n.author ?? "",
+    to: n.to_name ?? "",
+    content: n.content ?? "",
+    color: n.color,
+    x: n.x,
+    y: n.y,
+    rotation: n.rotation,
+    created_at: n.created_at,
+    updated_at: n.updated_at,
+  };
+}
+
 export default function ValentinesNotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
+  const notesRef = useRef<Note[]>([]);
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+  const postingRef = useRef<Set<string>>(new Set());
   const [draggedNote, setDraggedNote] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -161,6 +199,26 @@ export default function ValentinesNotesPage() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/notes", { cache: "no-store" });
+        if (!res.ok) throw new Error(`GET /api/notes failed (${res.status})`);
+        const data = (await res.json()) as { notes: ApiNote[] };
+        if (cancelled) return;
+        setNotes((data.notes ?? []).map(apiToUi));
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // useLayoutEffect(() => {
   //   const el = viewportRef.current;
   //   if (!el) return;
@@ -200,10 +258,36 @@ export default function ValentinesNotesPage() {
       );
     };
 
-    const onUp = () => {
-      if (!draggedNoteRef.current) return;
+    const onUp = async () => {
+      const id = draggedNoteRef.current;
+      if (!id) return;
+
       draggedNoteRef.current = null;
       setDraggedNote(null);
+
+      const token = getEditToken(id);
+      if (!token) return;
+
+      const n = notesRef.current.find((x) => x.id === id);
+      if (!n) return;
+
+      try {
+        const res = await fetch(`/api/notes/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            editToken: token,
+            patch: { x: n.x, y: n.y },
+          }),
+        });
+
+        if (!res.ok) {
+          const msg = await res.text().catch(() => "");
+          throw new Error(`PATCH failed (${res.status}): ${msg}`);
+        }
+      } catch (e) {
+        console.error(e);
+      }
     };
 
     window.addEventListener("mousemove", onMove);
@@ -253,12 +337,17 @@ export default function ValentinesNotesPage() {
   };
 
   const createNoteWithColor = (color: string) => {
-    const id = Date.now().toString();
+    const id = crypto.randomUUID();
+
+    // Create ownership token immediately (so POST can be safely retried)
+    const editToken = crypto.randomUUID();
+    setEditToken(id, editToken);
 
     const canvasSize = getCanvasSize();
-
-    // Center-first placement (your function already starts at center)
-    const placement = findNonOverlappingPositionPx(notes, canvasSize);
+    const placement = findNonOverlappingPositionPx(
+      notesRef.current,
+      canvasSize,
+    );
 
     const x = (placement.xPx / canvasSize.width) * 100;
     const y = (placement.yPx / canvasSize.height) * 100;
@@ -284,28 +373,111 @@ export default function ValentinesNotesPage() {
     );
   };
 
-  const deleteNote = (noteId: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
-    if (editingNoteId === noteId) setEditingNoteId(null);
-  };
-
-  const finishEdit = (noteId: string) => {
-    const note = notes.find((n) => n.id === noteId);
-    if (!note) return;
-
-    if (!note.content.trim()) {
-      deleteNote(noteId);
+  const deleteNote = async (noteId: string) => {
+    const token = getEditToken(noteId);
+    if (!token) {
+      alert("You can only delete notes you posted on this device/browser.");
       return;
     }
 
-    setEditingNoteId(null);
+    // optimistic UI
+    const prev = notesRef.current;
+    setNotes((p) => p.filter((n) => n.id !== noteId));
+    if (editingNoteId === noteId) setEditingNoteId(null);
 
-    // Burst aligns better if it's rendered inside the same zoomed canvas wrapper (below).
-    setBurst({ xPct: note.x, yPct: note.y, key: Date.now() });
-    setTimeout(() => setBurst(null), 800);
+    try {
+      const res = await fetch(
+        `/api/notes/${noteId}?editToken=${encodeURIComponent(token)}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(`DELETE failed (${res.status}): ${msg}`);
+      }
+
+      removeEditToken(noteId);
+    } catch (e) {
+      console.error(e);
+      // rollback if server rejected
+      setNotes(prev);
+    }
   };
 
-  const cancelEdit = (noteId: string) => deleteNote(noteId);
+  const finishEdit = async (noteId: string) => {
+    if (postingRef.current.has(noteId)) return; // prevent double-click duplicates
+
+    const note = notesRef.current.find((n) => n.id === noteId);
+    if (!note) return;
+
+    if (!note.content.trim()) {
+      // discard local-only note
+      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+      if (editingNoteId === noteId) setEditingNoteId(null);
+      removeEditToken(noteId);
+      return;
+    }
+
+    const editToken = getEditToken(noteId);
+    if (!editToken) {
+      alert("Missing edit token. Please create a new note again.");
+      return;
+    }
+
+    postingRef.current.add(noteId);
+
+    try {
+      // POST creates note and returns editToken
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: note.id,
+          editToken, // <-- important
+
+          author: note.author,
+          to_name: note.to,
+          content: note.content,
+          color: note.color,
+          x: note.x,
+          y: note.y,
+          rotation: note.rotation,
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(`POST /api/notes failed (${res.status}): ${msg}`);
+      }
+
+      const data = (await res.json()) as { note: ApiNote; editToken: string };
+
+      // Keep token (server returns the same one if duplicate+match)
+      if (data.editToken) setEditToken(note.id, data.editToken);
+
+      // Replace local note with canonical server note
+      setNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? apiToUi(data.note) : n)),
+      );
+
+      setEditingNoteId(null);
+
+      setBurst({ xPct: note.x, yPct: note.y, key: Date.now() });
+      setTimeout(() => setBurst(null), 800);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to post note. Please try again.");
+    } finally {
+      postingRef.current.delete(noteId);
+    }
+  };
+
+  const cancelEdit = (noteId: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    if (editingNoteId === noteId) setEditingNoteId(null);
+  };
 
   const selectColor = (color: string) => {
     setSelectedColor(color);
@@ -327,7 +499,13 @@ export default function ValentinesNotesPage() {
   const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
     if (editingNoteId === noteId) return;
 
-    const note = notes.find((n) => n.id === noteId);
+    const token = getEditToken(noteId);
+    if (!token) {
+      // not draggable if you don't own it
+      return;
+    }
+
+    const note = notesRef.current.find((n) => n.id === noteId);
     if (!note || !canvasRef.current) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
