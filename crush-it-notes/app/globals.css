@@ -57,6 +57,47 @@ body {
   }
 }
 
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+}
+
+.scrollbar-rose {
+  scrollbar-width: thin;
+  scrollbar-color: #f43f5e transparent;
+}
+
+.scrollbar-rose::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-rose::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 8px;
+}
+
+.scrollbar-rose::-webkit-scrollbar-thumb {
+  background: #f43f5e; /* rose-500 */
+  border-radius: 8px;
+}
+
+.scrollbar-rose::-webkit-scrollbar-thumb:hover {
+  background: #e11d48; /* rose-600 */
+}
+
+.scrollbar-rose::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+
 .animate-float {
   animation: float linear infinite;
 }
