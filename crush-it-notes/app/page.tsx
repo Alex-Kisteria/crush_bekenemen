@@ -200,6 +200,11 @@ export default function ValentinesNotesPage() {
     return s;
   }, [notes]);
 
+  const visibleNoteIds = useMemo(() => {
+    if (!searchQuery.trim()) return null;
+    return new Set(filteredNotes.map((n) => n.id));
+  }, [filteredNotes, searchQuery]);
+
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const selectedNote = useMemo(
     () => notes.find((n) => n.id === selectedNoteId) ?? null,
@@ -787,8 +792,9 @@ export default function ValentinesNotesPage() {
 
               <Canvas
                 ref={canvasRef}
-                notes={filteredNotes}
+                notes={notes}
                 ownedNoteIds={ownedNoteIds}
+                visibleNoteIds={visibleNoteIds}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseDown={handleMouseDown}

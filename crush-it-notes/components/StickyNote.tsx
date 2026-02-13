@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 interface StickyNoteProps {
   note: Note;
   isOwner: boolean;
+  isVisible: boolean;
   onMouseDown: (e: React.MouseEvent, noteId: string) => void;
   onDelete: (noteId: string) => void;
   onOpen: (noteId: string) => void;
@@ -14,6 +15,7 @@ interface StickyNoteProps {
 export default function StickyNote({
   note,
   isOwner,
+  isVisible,
   onMouseDown,
   onDelete,
   onOpen,
@@ -84,21 +86,38 @@ export default function StickyNote({
     pluckTimerRef.current = window.setTimeout(() => setPluck(false), 200);
   };
 
+  // Combine scales: pluck + filter fade
+  const baseScale = pluck ? 1.08 : 1;
+  const filterScale = isVisible ? 1 : 0.88; // More dramatic scale change
+  const finalScale = baseScale * filterScale;
+
   return (
     <div
       className={[
-        "absolute w-[240px] h-[200px] p-4 shadow-lg transition-shadow hover:shadow-2xl group rounded-xl",
-        "transition-transform duration-150 ease-out",
+        "absolute w-[240px] h-[200px] p-4 rounded-xl group",
+        "shadow-lg hover:shadow-2xl",
+        // Much slower, more noticeable transition (800ms)
+        "transition-[opacity,transform,filter,shadow] duration-[800ms] ease-in-out",
+        isVisible ? "opacity-100" : "opacity-0",
+        isVisible ? "blur-0" : "blur-[2px]",
+        // Reduce shadow when hidden
+        isVisible ? "" : "shadow-none",
+        // Disable interaction when filtered out
+        isVisible ? "pointer-events-auto" : "pointer-events-none",
         isOwner ? "cursor-move" : "cursor-pointer",
       ].join(" ")}
       style={{
         left: `${note.x}%`,
         top: `${note.y}%`,
         backgroundColor: note.color,
-        transform: `rotate(${note.rotation}deg) scale(${pluck ? 1.08 : 1})`,
-        willChange: "transform",
+        transform: `rotate(${note.rotation}deg) scale(${finalScale}) translateY(${isVisible ? 0 : 8}px)`,
+        willChange: "transform, opacity, filter",
+        // Add a slight color desaturation when hidden
+        filter: isVisible ? "none" : "blur(2px) saturate(0.4) brightness(0.9)",
       }}
+      aria-hidden={!isVisible}
       onMouseDown={(e) => {
+        if (!isVisible) return;
         if (isInteractiveTarget(e.target)) return;
 
         clickStartRef.current = {
@@ -113,6 +132,7 @@ export default function StickyNote({
         }
       }}
       onMouseUp={(e) => {
+        if (!isVisible) return;
         if (isInteractiveTarget(e.target)) return;
 
         const start = clickStartRef.current;
@@ -123,13 +143,9 @@ export default function StickyNote({
         const dt = Date.now() - start.time;
         const distance = Math.hypot(dx, dy);
 
-        // Only treat as click if:
-        // - moved less than 8px
-        // - held for less than 300ms
         if (distance < 8 && dt < 300) {
           doPluck();
-          // Delay opening modal by 400ms to show pluck animation
-          setTimeout(() => {
+          window.setTimeout(() => {
             onOpen(note.id);
           }, 400);
         }
@@ -209,7 +225,7 @@ export default function StickyNote({
                   href={note.trackSpotifyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2 py-1 rounded-lg text-[11px] text-rose-300 bg-white/70 border border-rose-600/20 hover:bg-rose-50"
+                  className="px-2 py-1 rounded-lg text-[11px] bg-white/70 border border-rose-600/20 hover:bg-rose-50"
                 >
                   Open
                 </a>
