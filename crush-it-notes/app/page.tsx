@@ -15,6 +15,7 @@ import {
   removeEditToken,
   setEditToken,
 } from "@/lib/noteEditTokens";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 const PASTEL_COLORS = [
   "#FFB3BA", // Light pink
@@ -149,6 +150,7 @@ export default function ValentinesNotesPage() {
     notesRef.current = notes;
   }, [notes]);
   const postingRef = useRef<Set<string>>(new Set());
+  const [postingNoteId, setPostingNoteId] = useState<string | null>(null);
   const [draggedNote, setDraggedNote] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -219,26 +221,74 @@ export default function ValentinesNotesPage() {
     };
   }, []);
 
-  // useLayoutEffect(() => {
-  //   const el = viewportRef.current;
-  //   if (!el) return;
+  useEffect(() => {
+    const channel = supabaseBrowser
+      .channel("notes-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notes" },
+        (payload) => {
+          // Debug
+          // console.log("[realtime payload]", payload);
 
-  //   const set = () =>
-  //     setBaseSize({ width: el.clientWidth, height: el.clientHeight });
+          const evt = payload.eventType;
 
-  //   set();
+          if (evt === "INSERT") {
+            const row = payload.new as any as ApiNote;
+            setNotes((prev) =>
+              prev.some((n) => n.id === row.id)
+                ? prev
+                : [...prev, apiToUi(row)],
+            );
+            return;
+          }
 
-  //   const ro = new ResizeObserver(() => set());
-  //   ro.observe(el);
+          if (evt === "UPDATE") {
+            const row = payload.new as any as ApiNote;
+            setNotes((prev) =>
+              prev.map((n) => (n.id === row.id ? apiToUi(row) : n)),
+            );
+            return;
+          }
 
-  //   window.addEventListener("resize", set);
-  //   return () => {
-  //     ro.disconnect();
-  //     window.removeEventListener("resize", set);
-  //   };
-  // }, []);
+          if (evt === "DELETE") {
+            const row = payload.old as any as { id: string };
+            setNotes((prev) => prev.filter((n) => n.id !== row.id));
+          }
+        },
+      );
+
+    channel.subscribe((status) => {
+      console.log("[realtime notes-live]", status);
+    });
+
+    return () => {
+      supabaseBrowser.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
+    const lastSentAtRef = { current: 0 };
+    const lastPosRef = { current: { x: 0, y: 0 } };
+
+    const sendPosition = async (id: string, x: number, y: number) => {
+      const token = getEditToken(id);
+      if (!token) return;
+
+      try {
+        await fetch(`/api/notes/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            editToken: token,
+            patch: { x, y },
+          }),
+        });
+      } catch {
+        // ignore transient errors during drag
+      }
+    };
+
     const onMove = (e: MouseEvent) => {
       const id = draggedNoteRef.current;
       if (!id || !canvasRef.current) return;
@@ -246,16 +296,29 @@ export default function ValentinesNotesPage() {
       const rect = canvasRef.current.getBoundingClientRect();
       const off = dragOffsetRef.current;
 
-      const newX = ((e.clientX - off.x - rect.left) / rect.width) * 100;
-      const newY = ((e.clientY - off.y - rect.top) / rect.height) * 100;
+      const newX = clamp(
+        ((e.clientX - off.x - rect.left) / rect.width) * 100,
+        0,
+        95,
+      );
+      const newY = clamp(
+        ((e.clientY - off.y - rect.top) / rect.height) * 100,
+        0,
+        95,
+      );
+
+      lastPosRef.current = { x: newX, y: newY };
 
       setNotes((prev) =>
-        prev.map((n) =>
-          n.id === id
-            ? { ...n, x: clamp(newX, 0, 95), y: clamp(newY, 0, 95) }
-            : n,
-        ),
+        prev.map((n) => (n.id === id ? { ...n, x: newX, y: newY } : n)),
       );
+
+      // Throttle network updates (e.g., every 120ms)
+      const now = Date.now();
+      if (now - lastSentAtRef.current >= 120) {
+        lastSentAtRef.current = now;
+        void sendPosition(id, newX, newY);
+      }
     };
 
     const onUp = async () => {
@@ -265,29 +328,9 @@ export default function ValentinesNotesPage() {
       draggedNoteRef.current = null;
       setDraggedNote(null);
 
-      const token = getEditToken(id);
-      if (!token) return;
-
-      const n = notesRef.current.find((x) => x.id === id);
-      if (!n) return;
-
-      try {
-        const res = await fetch(`/api/notes/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            editToken: token,
-            patch: { x: n.x, y: n.y },
-          }),
-        });
-
-        if (!res.ok) {
-          const msg = await res.text().catch(() => "");
-          throw new Error(`PATCH failed (${res.status}): ${msg}`);
-        }
-      } catch (e) {
-        console.error(e);
-      }
+      // final precise save
+      const { x, y } = lastPosRef.current;
+      await sendPosition(id, x, y);
     };
 
     window.addEventListener("mousemove", onMove);
@@ -407,7 +450,7 @@ export default function ValentinesNotesPage() {
   };
 
   const finishEdit = async (noteId: string) => {
-    if (postingRef.current.has(noteId)) return; // prevent double-click duplicates
+    if (postingRef.current.has(noteId)) return;
 
     const note = notesRef.current.find((n) => n.id === noteId);
     if (!note) return;
@@ -427,6 +470,7 @@ export default function ValentinesNotesPage() {
     }
 
     postingRef.current.add(noteId);
+    setPostingNoteId(noteId);
 
     try {
       // POST creates note and returns editToken
@@ -471,6 +515,7 @@ export default function ValentinesNotesPage() {
       alert("Failed to post note. Please try again.");
     } finally {
       postingRef.current.delete(noteId);
+      setPostingNoteId((current) => (current === noteId ? null : current));
     }
   };
 
@@ -568,6 +613,7 @@ export default function ValentinesNotesPage() {
               ref={canvasRef}
               notes={notes}
               editingNoteId={editingNoteId}
+              postingNoteId={postingNoteId}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseDown={handleMouseDown}

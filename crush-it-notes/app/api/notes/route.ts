@@ -1,10 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import crypto from "crypto";
+
+function asFiniteNumber(v: unknown): number | null {
+  const n = typeof v === "string" ? Number(v) : (v as number);
+  return Number.isFinite(n) ? n : null;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function sha256Hex(s: string) {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
 
 export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("notes")
-    // never return edit_token to the public
     .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
     .order("created_at", { ascending: true });
 
@@ -16,79 +29,76 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
-  const note = {
-    id: body.id as string,
-    // client-provided token makes POST idempotent & preserves ownership even if client misses response
-    edit_token: (body.editToken as string | undefined) ?? undefined,
+  const id = String(body.id ?? "");
+  const editToken = String(body.editToken ?? "");
 
+  const xRaw = asFiniteNumber(body.x);
+  const yRaw = asFiniteNumber(body.y);
+  const rotRaw = asFiniteNumber(body.rotation);
+
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  if (!editToken) return NextResponse.json({ error: "Missing editToken" }, { status: 400 });
+  if (!String(body.content ?? "").trim()) {
+    return NextResponse.json({ error: "Message is required" }, { status: 400 });
+  }
+  if (xRaw === null || yRaw === null || rotRaw === null) {
+    return NextResponse.json(
+      { error: "Invalid coordinates (x/y/rotation must be finite numbers)" },
+      { status: 400 },
+    );
+  }
+
+  const note = {
+    id,
     author: String(body.author ?? ""),
     to_name: String(body.to_name ?? ""),
     content: String(body.content ?? ""),
     color: String(body.color ?? "#FFE5E5"),
-    x: Number(body.x ?? 50),
-    y: Number(body.y ?? 35),
-    rotation: Number(body.rotation ?? 0),
+    x: clamp(xRaw, 0, 95),
+    y: clamp(yRaw, 0, 95),
+    rotation: rotRaw,
   };
 
-  if (!note.id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-  if (!note.content.trim()) return NextResponse.json({ error: "Message is required" }, { status: 400 });
-
-  // Insert attempt
+  // Insert note
   const { data, error } = await supabaseAdmin
     .from("notes")
     .insert(note)
-    .select("id, edit_token, author, to_name, content, color, x, y, rotation, created_at, updated_at")
+    .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
     .single();
 
   if (!error && data) {
-    return NextResponse.json({
-      note: {
-        id: data.id,
-        author: data.author,
-        to_name: data.to_name,
-        content: data.content,
-        color: data.color,
-        x: data.x,
-        y: data.y,
-        rotation: data.rotation,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
-      },
-      editToken: data.edit_token,
+    // Insert token hash
+    const { error: tokErr } = await supabaseAdmin.from("note_tokens").insert({
+      note_id: id,
+      token_hash: sha256Hex(editToken),
     });
-  }
 
-  // If duplicate primary key, verify ownership token and return success or conflict
-  // PostgREST duplicate key error code is typically 23505 (may be under error.code)
-  const code = (error as any)?.code as string | undefined;
-  if (code === "23505") {
-    const { data: existing, error: selErr } = await supabaseAdmin
-      .from("notes")
-      .select("id, edit_token, author, to_name, content, color, x, y, rotation, created_at, updated_at")
-      .eq("id", note.id)
-      .single();
-
-    if (selErr || !existing) {
-      return NextResponse.json({ error: "Note already exists" }, { status: 409 });
+    if (tokErr) {
+      // cleanup if token insert fails
+      await supabaseAdmin.from("notes").delete().eq("id", id);
+      return NextResponse.json({ error: tokErr.message }, { status: 500 });
     }
 
-    // If client token matches, treat as already-posted success
-    if (note.edit_token && existing.edit_token === note.edit_token) {
-      return NextResponse.json({
-        note: {
-          id: existing.id,
-          author: existing.author,
-          to_name: existing.to_name,
-          content: existing.content,
-          color: existing.color,
-          x: existing.x,
-          y: existing.y,
-          rotation: existing.rotation,
-          created_at: existing.created_at,
-          updated_at: existing.updated_at,
-        },
-        editToken: existing.edit_token,
-      });
+    return NextResponse.json({ note: data, editToken });
+  }
+
+  // Duplicate primary key: allow idempotent success if token matches
+  const code = (error as any)?.code as string | undefined;
+  if (code === "23505") {
+    const { data: existingTok } = await supabaseAdmin
+      .from("note_tokens")
+      .select("token_hash")
+      .eq("note_id", id)
+      .single();
+
+    if (existingTok?.token_hash === sha256Hex(editToken)) {
+      const { data: existingNote } = await supabaseAdmin
+        .from("notes")
+        .select("id, author, to_name, content, color, x, y, rotation, created_at, updated_at")
+        .eq("id", id)
+        .single();
+
+      return NextResponse.json({ note: existingNote, editToken });
     }
 
     return NextResponse.json({ error: "Not allowed" }, { status: 409 });

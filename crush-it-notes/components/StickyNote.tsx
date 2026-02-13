@@ -8,6 +8,7 @@ type NotePatch = Partial<
 interface StickyNoteProps {
   note: Note;
   isEditing?: boolean;
+  isPosting?: boolean;
   onMouseDown: (e: React.MouseEvent, noteId: string) => void;
   onDelete: (noteId: string) => void;
 
@@ -19,6 +20,7 @@ interface StickyNoteProps {
 export default function StickyNote({
   note,
   isEditing = false,
+  isPosting = false,
   onMouseDown,
   onDelete,
   onUpdateNote,
@@ -117,7 +119,8 @@ export default function StickyNote({
             <button
               type="button"
               onClick={() => onCancelEdit(note.id)}
-              className="px-3 py-1.5 rounded-lg text-xs border border-rose-300 text-rose-700 hover:bg-rose-50"
+              disabled={isPosting}
+              className="px-3 py-1.5 rounded-lg text-xs border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-50 disabled:hover:bg-transparent"
               title="Discard"
             >
               Discard
@@ -126,10 +129,11 @@ export default function StickyNote({
             <button
               type="button"
               onClick={() => onFinishEdit(note.id)}
-              className="px-3 py-1.5 rounded-lg text-xs bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:brightness-105 shadow-sm"
+              disabled={isPosting}
+              className="px-3 py-1.5 rounded-lg text-xs bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:brightness-105 shadow-sm disabled:opacity-70 disabled:hover:brightness-100"
               title="Post note"
             >
-              Post
+              {isPosting ? "..." : "Post"}
             </button>
           </div>
         </div>
