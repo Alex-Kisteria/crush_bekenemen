@@ -2,12 +2,12 @@ import Image from "next/image";
 
 export default function Header() {
   return (
-    <div className="absolute top-6 left-8 z-50">
+    <div className="absolute top-2 left-2 z-50">
       <Image
-        src="Valentine's Wall.svg"
+        src="/valentines-wall.svg"
         alt="Valentine's Wall"
-        width={200}
-        height={50}
+        width={300}
+        height={60}
         priority
       />
     </div>

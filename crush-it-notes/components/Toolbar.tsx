@@ -10,7 +10,7 @@ export default function Toolbar({ onAddNote }: ToolbarProps) {
       <div className="relative flex flex-col gap-3 rounded-2xl p-3">
         <button
           onClick={onAddNote}
-          className="w-15 h-15 rounded-4xl bg-pink-700 backdrop-blur-sm border border-rose-100 text-white flex items-center justify-center hover:scale-110 transition-transform shadow-md"
+          className="w-15 h-15 rounded-4xl bg-pink-700 backdrop-blur-sm border-2 border-rose-100 text-white flex items-center justify-center hover:scale-110 transition-transform shadow-md"
           title="Add Note"
         >
           <StickyNoteIcon

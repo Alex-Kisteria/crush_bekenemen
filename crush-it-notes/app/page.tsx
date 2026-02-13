@@ -5,6 +5,7 @@ import Header from "@/components/Header";
 import Canvas from "@/components/Canvas";
 import Toolbar from "@/components/Toolbar";
 import ZoomControls from "@/components/Zoomcontrols";
+import SearchFilter from "@/components/SearchFilter";
 import FallingHeartsBackground from "@/components/FallingHeartsBackground";
 import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
 import CreateNoteModal from "@/components/Createnotemodal";
@@ -175,6 +176,19 @@ export default function ValentinesNotesPage() {
     notesRef.current = notes;
   }, [notes]);
 
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredNotes = useMemo(() => {
+    if (!searchQuery.trim()) return notes;
+
+    const query = searchQuery.toLowerCase().trim();
+    return notes.filter((note) => {
+      const author = (note.author || "").toLowerCase();
+      const to = (note.to || "").toLowerCase();
+      return author.includes(query) || to.includes(query);
+    });
+  }, [notes, searchQuery]);
+
   const ownedNoteIds = useMemo(() => {
     const s = new Set<string>();
     for (const n of notes) {
@@ -221,6 +235,9 @@ export default function ValentinesNotesPage() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [baseSize, setBaseSize] = useState<CanvasSize>({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLDivElement>(null);
+  const handleClearSearch = () => {
+    setSearchQuery("");
+  };
 
   const getCanvasSize = (): CanvasSize => {
     const vp = viewportRef.current;
@@ -726,6 +743,14 @@ export default function ValentinesNotesPage() {
     <div className="relative w-full h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-red-50">
       <Header />
 
+      <SearchFilter
+        value={searchQuery}
+        onChange={setSearchQuery}
+        onClear={handleClearSearch}
+        resultCount={filteredNotes.length}
+        totalCount={notes.length}
+      />
+
       <FallingHeartsBackground />
 
       {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
@@ -733,7 +758,6 @@ export default function ValentinesNotesPage() {
         ref={viewportRef}
         className="absolute inset-0 overflow-auto scrollbar-rose z-20"
         style={{
-          // prevents layout shift when scrollbars appear/disappear
           scrollbarGutter: "stable",
         }}
       >
@@ -755,7 +779,7 @@ export default function ValentinesNotesPage() {
 
             <Canvas
               ref={canvasRef}
-              notes={notes}
+              notes={filteredNotes}
               ownedNoteIds={ownedNoteIds}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}

@@ -16,6 +16,7 @@ export default function NoteDetailsModal({
 }: NoteDetailsModalProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
 
   const authorLabel = useMemo(() => {
     const a = (note?.author ?? "").trim();
@@ -26,6 +27,15 @@ export default function NoteDetailsModal({
     const t = (note?.to ?? "").trim();
     return t ? t : "—";
   }, [note?.to]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsAnimating(true);
+    } else {
+      const timer = setTimeout(() => setIsAnimating(false), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -57,7 +67,6 @@ export default function NoteDetailsModal({
   }, [note?.trackPreviewUrl]);
 
   useEffect(() => {
-    // Stop preview when closing / switching notes
     const a = audioRef.current;
     if (!a) return;
     a.pause();
@@ -80,45 +89,82 @@ export default function NoteDetailsModal({
     }
   };
 
-  if (!isOpen || !note) return null;
+  const stop = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.pause();
+    a.currentTime = 0;
+    setIsPlaying(false);
+  };
+
+  if (!isAnimating && !isOpen) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[60] bg-black/5 backdrop-blur-xs flex items-center justify-center p-4"
+      className={[
+        "fixed inset-0 z-[60] flex items-center justify-center p-4 transition-all duration-300",
+        isOpen
+          ? "bg-black/5 backdrop-blur-xs"
+          : "bg-black/0 backdrop-blur-none pointer-events-none",
+      ].join(" ")}
       onMouseDown={(e) => {
-        // click outside to close
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className="w-full max-w-2xl rounded-3xl shadow-2xl border border-rose-100 overflow-hidden bg-white"
-        style={{ outline: "none" }}
+        className={[
+          "w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden",
+          "transition-all duration-300 ease-out",
+          isOpen
+            ? "opacity-100 scale-100 translate-y-0"
+            : "opacity-0 scale-95 translate-y-4",
+        ].join(" ")}
+        style={{
+          backgroundColor: note?.color ?? "#FFE5E5",
+          outline: "none",
+          transform: `rotate(${(note?.rotation ?? 0) * 0.3}deg)`,
+        }}
       >
-        <div
-          className="px-6 py-4 flex items-start justify-between gap-3"
-          style={{ backgroundColor: note.color }}
-        >
-          <div className="min-w-0">
-            <div className="text-rose-900/80 text-sm">
-              <span className="font-semibold">From:</span> {authorLabel}{" "}
-              <span className="mx-2">•</span>
-              <span className="font-semibold">To:</span> {toLabel}
+        {/* Sticky note header with tape effect */}
+        <div className="relative px-6 pt-6 pb-4">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-8 bg-white/30 rounded-b-lg border-t-2 border-white/50" />
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-rose-400/80 text-white flex items-center justify-center hover:bg-rose-500 transition-colors shadow-md z-10"
+            title="Close"
+          >
+            ×
+          </button>
+
+          <div className="text-gray-800 font-note text-sm leading-tight pt-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="opacity-70 font-semibold">From:</span>
+              <span className="font-semibold">{authorLabel}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="opacity-70 font-semibold">To:</span>
+              <span className="font-semibold">{toLabel}</span>
             </div>
           </div>
         </div>
 
-        <div className="p-6">
-          <div className="text-rose-950 font-semibold mb-2">Message</div>
-          <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-4 max-h-[40vh] overflow-auto whitespace-pre-wrap break-words text-rose-950">
-            {note.content}
+        <div className="px-6 pb-6">
+          {/* Message content */}
+          <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 mb-4 border border-black/5 shadow-inner">
+            <div className="text-gray-800 font-note text-base whitespace-pre-wrap break-words max-h-[250px] overflow-auto">
+              {note?.content}
+            </div>
           </div>
 
-          {(note.trackId || note.trackPreviewUrl || note.trackSpotifyUrl) && (
-            <div className="mt-6">
-              <div className="text-rose-950 font-semibold mb-2">Song</div>
-
-              <div className="rounded-2xl border border-rose-100 bg-white p-4 flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0">
+          {/* Song section */}
+          {(note?.trackId ||
+            note?.trackPreviewUrl ||
+            note?.trackSpotifyUrl) && (
+            <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner">
+              <div className="flex items-center gap-3 mb-3">
+                {/* <div className="w-14 h-14 rounded-xl overflow-hidden bg-white border border-rose-100 flex items-center justify-center shrink-0 shadow-md">
                   {note.trackImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -129,55 +175,73 @@ export default function NoteDetailsModal({
                   ) : (
                     <div className="text-xs text-rose-700/60">No img</div>
                   )}
-                </div>
+                </div> */}
 
-                <div className="min-w-0 flex-1">
-                  <div className="text-rose-950 font-semibold truncate">
+                {/* <div className="min-w-0 flex-1">
+                  <div className="text-rose-950 font-semibold text-sm truncate">
                     {note.trackName ?? "Song"}
                   </div>
-                  <div className="text-rose-900/70 text-sm truncate">
+                  <div className="text-rose-900/70 text-xs truncate">
                     {note.trackArtists ?? ""}
                   </div>
+                </div> */}
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {note.trackPreviewUrl ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={togglePlay}
-                          className="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-semibold hover:bg-rose-700"
-                        >
-                          {isPlaying ? "Pause" : "Play"} preview
-                        </button>
-
-                        <audio
-                          ref={audioRef}
-                          src={note.trackPreviewUrl}
-                          preload="none"
-                        />
-                      </>
-                    ) : (
-                      <div className="text-sm text-rose-900/70">
-                        No preview available
-                      </div>
-                    )}
-
-                    {note.trackSpotifyUrl && (
-                      <a
-                        href={note.trackSpotifyUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-2 rounded-xl bg-white border border-rose-200 text-rose-900 text-sm hover:bg-rose-50"
+                <div className="flex items-center gap-2">
+                  {note.trackPreviewUrl && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        className="px-3 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition-colors shadow-md"
                       >
-                        Open in Spotify
-                      </a>
-                    )}
-                  </div>
+                        {isPlaying ? "Pause" : "Play"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={stop}
+                        className="px-3 py-2 rounded-xl bg-white border border-rose-200 text-rose-900 text-xs hover:bg-rose-50 transition-colors"
+                      >
+                        Stop
+                      </button>
+
+                      <audio
+                        ref={audioRef}
+                        src={note.trackPreviewUrl}
+                        preload="none"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
+
+              {/* Spotify Embed */}
+              {note.trackId && (
+                <div className="rounded-xl overflow-hidden shadow-md">
+                  <iframe
+                    title="Spotify Player"
+                    src={`https://open.spotify.com/embed/track/${note.trackId}`}
+                    width="100%"
+                    height="152"
+                    frameBorder="0"
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                    style={{ borderRadius: 12 }}
+                  />
+                </div>
+              )}
+
+              {!note.trackPreviewUrl && (
+                <div className="text-xs text-rose-900/70 mt-2">
+                  No preview audio available. Use the embedded player above.
+                </div>
+              )}
             </div>
           )}
         </div>
+
+        {/* Decorative shadow lines at bottom to enhance sticky note effect */}
+        <div className="h-3 bg-gradient-to-b from-transparent to-black/5" />
       </div>
     </div>
   );

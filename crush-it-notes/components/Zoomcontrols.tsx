@@ -18,7 +18,7 @@ export default function ZoomControls({
   const pct = Math.round(zoom * 100);
 
   return (
-    <div className="absolute bottom-6 left-4 z-50 flex items-center bg-white/80 backdrop-blur-sm rounded-xl px-4 py-2 font-semibold shadow-lg border border-rose-600/25">
+    <div className="absolute bottom-6 left-4 z-50 flex items-center bg-white/80 backdrop-blur-sm rounded-xl px-4 py-1 font-semibold shadow-lg border-3 border-rose-600/25">
       <button
         type="button"
         onClick={onZoomOut}

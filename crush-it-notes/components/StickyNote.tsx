@@ -27,6 +27,10 @@ export default function StickyNote({
   const [pluck, setPluck] = useState(false);
   const pluckTimerRef = useRef<number | null>(null);
 
+  const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(
+    null,
+  );
+
   useEffect(() => {
     return () => {
       if (pluckTimerRef.current) window.clearTimeout(pluckTimerRef.current);
@@ -77,7 +81,7 @@ export default function StickyNote({
   const doPluck = () => {
     setPluck(true);
     if (pluckTimerRef.current) window.clearTimeout(pluckTimerRef.current);
-    pluckTimerRef.current = window.setTimeout(() => setPluck(false), 160);
+    pluckTimerRef.current = window.setTimeout(() => setPluck(false), 200);
   };
 
   return (
@@ -91,21 +95,46 @@ export default function StickyNote({
         left: `${note.x}%`,
         top: `${note.y}%`,
         backgroundColor: note.color,
-        transform: `rotate(${note.rotation}deg) scale(${pluck ? 1.06 : 1})`,
+        transform: `rotate(${note.rotation}deg) scale(${pluck ? 1.08 : 1})`,
         willChange: "transform",
       }}
       onMouseDown={(e) => {
-        // Only owners can drag. Also: don't start drag from interactive controls.
-        if (!isOwner) return;
         if (isInteractiveTarget(e.target)) return;
 
-        e.preventDefault();
-        onMouseDown(e, note.id);
+        clickStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          time: Date.now(),
+        };
+
+        if (isOwner) {
+          e.preventDefault();
+          onMouseDown(e, note.id);
+        }
       }}
-      onClick={(e) => {
+      onMouseUp={(e) => {
         if (isInteractiveTarget(e.target)) return;
-        doPluck();
-        onOpen(note.id);
+
+        const start = clickStartRef.current;
+        if (!start) return;
+
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        const dt = Date.now() - start.time;
+        const distance = Math.hypot(dx, dy);
+
+        // Only treat as click if:
+        // - moved less than 8px
+        // - held for less than 300ms
+        if (distance < 8 && dt < 300) {
+          doPluck();
+          // Delay opening modal by 400ms to show pluck animation
+          setTimeout(() => {
+            onOpen(note.id);
+          }, 400);
+        }
+
+        clickStartRef.current = null;
       }}
     >
       {isOwner && (
@@ -122,7 +151,7 @@ export default function StickyNote({
         </button>
       )}
 
-      <div className="h-full flex flex-col gap-2">
+      <div className="h-full flex flex-col gap-2 pointer-events-none">
         <div className="text-gray-800 text-xs font-note leading-tight">
           <div className="truncate">
             <span className="opacity-70">From:</span> {authorLabel}
@@ -138,8 +167,8 @@ export default function StickyNote({
 
         {hasSong && (
           <div className="mt-1 pt-2 border-t border-black/10">
-            <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <div className="min-w-0 flex-1 pointer-events-none">
                 <div className="text-xs font-semibold text-rose-900 truncate">
                   {note.trackName ?? "Song"}
                 </div>
@@ -168,7 +197,9 @@ export default function StickyNote({
                   />
                 </>
               ) : (
-                <div className="text-[11px] text-rose-800/60">No preview</div>
+                <div className="text-[11px] text-rose-800/60 pointer-events-none">
+                  No preview
+                </div>
               )}
 
               {note.trackSpotifyUrl && (
