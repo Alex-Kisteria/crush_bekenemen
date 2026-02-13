@@ -4,14 +4,27 @@ import StickyNote from "./StickyNote";
 
 interface CanvasProps {
   notes: Note[];
+  ownedNoteIds: Set<string>;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
   onMouseDown: (e: React.MouseEvent, noteId: string) => void;
   onDeleteNote: (noteId: string) => void;
+  onOpenNote: (noteId: string) => void;
 }
 
 const Canvas = forwardRef<HTMLDivElement, CanvasProps>(
-  ({ notes, onMouseMove, onMouseUp, onMouseDown, onDeleteNote }, ref) => {
+  (
+    {
+      notes,
+      ownedNoteIds,
+      onMouseMove,
+      onMouseUp,
+      onMouseDown,
+      onDeleteNote,
+      onOpenNote,
+    },
+    ref,
+  ) => {
     return (
       <div
         ref={ref}
@@ -24,8 +37,10 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(
           <StickyNote
             key={note.id}
             note={note}
+            isOwner={ownedNoteIds.has(note.id)}
             onMouseDown={onMouseDown}
             onDelete={onDeleteNote}
+            onOpen={onOpenNote}
           />
         ))}
       </div>

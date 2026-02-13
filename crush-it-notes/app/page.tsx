@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/components/Header";
 import Canvas from "@/components/Canvas";
 import Toolbar from "@/components/Toolbar";
@@ -8,6 +8,7 @@ import ZoomControls from "@/components/Zoomcontrols";
 import FallingHeartsBackground from "@/components/FallingHeartsBackground";
 import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
 import CreateNoteModal from "@/components/Createnotemodal";
+import NoteDetailsModal from "@/components/NoteDetailsModal";
 import { Note } from "@/types/note";
 import {
   getEditToken,
@@ -173,6 +174,20 @@ export default function ValentinesNotesPage() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  const ownedNoteIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of notes) {
+      if (getEditToken(n.id)) s.add(n.id);
+    }
+    return s;
+  }, [notes]);
+
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const selectedNote = useMemo(
+    () => notes.find((n) => n.id === selectedNoteId) ?? null,
+    [notes, selectedNoteId],
+  );
   const [burst, setBurst] = useState<NoteBurst>(null);
 
   // Create Note modal state
@@ -189,6 +204,13 @@ export default function ValentinesNotesPage() {
   const [draggedNote, setDraggedNote] = useState<string | null>(null);
   const draggedNoteRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+
+  const dragStartMouseRef = useRef<{ x: number; y: number } | null>(null);
+  const didDragMoveRef = useRef(false);
+  const lastDragRef = useRef<{ id: string | null; at: number }>({
+    id: null,
+    at: 0,
+  });
 
   // Zoom
   const [zoom, setZoom] = useState(1);
@@ -268,6 +290,10 @@ export default function ValentinesNotesPage() {
 
           if (evt === "UPDATE") {
             const row = payload.new as any as ApiNote;
+
+            // Prevent jitter: don't let realtime overwrite the position while we're dragging locally.
+            if (draggedNoteRef.current === row.id) return;
+
             setNotes((prev) =>
               prev.map((n) => (n.id === row.id ? apiToUi(row) : n)),
             );
@@ -291,6 +317,18 @@ export default function ValentinesNotesPage() {
     const lastSentAtRef = { current: 0 };
     const lastPosRef = { current: { x: 0, y: 0 } };
 
+    let rafId: number | null = null;
+    let pending: { id: string; x: number; y: number } | null = null;
+
+    const flush = () => {
+      rafId = null;
+      if (!pending) return;
+      const { id, x, y } = pending;
+      pending = null;
+
+      setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
+    };
+
     const sendPosition = async (id: string, x: number, y: number) => {
       const token = getEditToken(id);
       if (!token) return;
@@ -305,13 +343,20 @@ export default function ValentinesNotesPage() {
           }),
         });
       } catch {
-        // ignore transient errors during drag
+        // ignore
       }
     };
 
     const onMove = (e: MouseEvent) => {
       const id = draggedNoteRef.current;
       if (!id || !canvasRef.current) return;
+
+      // mark as a "real drag" once we exceed a small threshold
+      if (!didDragMoveRef.current && dragStartMouseRef.current) {
+        const dx = e.clientX - dragStartMouseRef.current.x;
+        const dy = e.clientY - dragStartMouseRef.current.y;
+        if (Math.hypot(dx, dy) >= 4) didDragMoveRef.current = true;
+      }
 
       const rect = canvasRef.current.getBoundingClientRect();
       const off = dragOffsetRef.current;
@@ -329,11 +374,9 @@ export default function ValentinesNotesPage() {
 
       lastPosRef.current = { x: newX, y: newY };
 
-      setNotes((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, x: newX, y: newY } : n)),
-      );
+      pending = { id, x: newX, y: newY };
+      if (rafId === null) rafId = requestAnimationFrame(flush);
 
-      // Throttle network updates (e.g., every 120ms)
       const now = Date.now();
       if (now - lastSentAtRef.current >= 120) {
         lastSentAtRef.current = now;
@@ -348,7 +391,19 @@ export default function ValentinesNotesPage() {
       draggedNoteRef.current = null;
       setDraggedNote(null);
 
-      // final precise save
+      if (didDragMoveRef.current) {
+        lastDragRef.current = { id, at: Date.now() };
+      }
+
+      didDragMoveRef.current = false;
+      dragStartMouseRef.current = null;
+
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      flush();
+
       const { x, y } = lastPosRef.current;
       await sendPosition(id, x, y);
     };
@@ -358,6 +413,7 @@ export default function ValentinesNotesPage() {
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, []);
 
@@ -637,6 +693,9 @@ export default function ValentinesNotesPage() {
     const note = notesRef.current.find((n) => n.id === noteId);
     if (!note || !canvasRef.current) return;
 
+    dragStartMouseRef.current = { x: e.clientX, y: e.clientY };
+    didDragMoveRef.current = false;
+
     const rect = canvasRef.current.getBoundingClientRect();
     const noteX = (note.x / 100) * rect.width;
     const noteY = (note.y / 100) * rect.height;
@@ -644,6 +703,14 @@ export default function ValentinesNotesPage() {
     dragOffsetRef.current = { x: e.clientX - noteX, y: e.clientY - noteY };
     setDraggedNote(noteId);
     draggedNoteRef.current = noteId;
+  };
+
+  const handleOpenNote = (noteId: string) => {
+    // If we just dragged this note, don't open the modal from the click event.
+    const last = lastDragRef.current;
+    if (last.id === noteId && Date.now() - last.at < 250) return;
+
+    setSelectedNoteId(noteId);
   };
 
   const handleMouseMove = (_e: React.MouseEvent) => {};
@@ -664,7 +731,7 @@ export default function ValentinesNotesPage() {
       {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
       <div
         ref={viewportRef}
-        className="absolute inset-0 overflow-auto z-20"
+        className="absolute inset-0 overflow-auto scrollbar-rose z-20"
         style={{
           // prevents layout shift when scrollbars appear/disappear
           scrollbarGutter: "stable",
@@ -689,10 +756,12 @@ export default function ValentinesNotesPage() {
             <Canvas
               ref={canvasRef}
               notes={notes}
+              ownedNoteIds={ownedNoteIds}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseDown={handleMouseDown}
               onDeleteNote={deleteNote}
+              onOpenNote={handleOpenNote}
             />
           </div>
         </div>
@@ -707,6 +776,12 @@ export default function ValentinesNotesPage() {
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onReset={zoomReset}
+      />
+
+      <NoteDetailsModal
+        isOpen={!!selectedNoteId}
+        note={selectedNote}
+        onClose={() => setSelectedNoteId(null)}
       />
 
       <CreateNoteModal
