@@ -10,6 +10,7 @@ import FallingHeartsBackground from "@/components/FallingHeartsBackground";
 import NoteHeartsBurst, { NoteBurst } from "@/components/NotesHeartsBurst";
 import CreateNoteModal from "@/components/Createnotemodal";
 import NoteDetailsModal from "@/components/NoteDetailsModal";
+import ValentinesIntro from "@/components/ValentinesIntro";
 import { Note } from "@/types/note";
 import {
   getEditToken,
@@ -170,8 +171,10 @@ type ModalTrack = {
 };
 
 export default function ValentinesNotesPage() {
+  const [showIntro, setShowIntro] = useState(true);
   const [notes, setNotes] = useState<Note[]>([]);
   const notesRef = useRef<Note[]>([]);
+
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
@@ -740,93 +743,99 @@ export default function ValentinesNotesPage() {
   const worldH = baseSize.height > 0 ? baseSize.height : getCanvasSize().height;
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-red-50">
-      <Header />
+    <>
+      {showIntro && <ValentinesIntro onComplete={() => setShowIntro(false)} />}
+      <div className="relative w-full h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-red-50">
+        <Header />
 
-      <SearchFilter
-        value={searchQuery}
-        onChange={setSearchQuery}
-        onClear={handleClearSearch}
-        resultCount={filteredNotes.length}
-        totalCount={notes.length}
-      />
+        <SearchFilter
+          value={searchQuery}
+          onChange={setSearchQuery}
+          onClear={handleClearSearch}
+          resultCount={filteredNotes.length}
+          totalCount={notes.length}
+        />
 
-      <FallingHeartsBackground />
+        <FallingHeartsBackground />
 
-      {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
-      <div
-        ref={viewportRef}
-        className="absolute inset-0 overflow-auto scrollbar-rose z-20"
-        style={{
-          scrollbarGutter: "stable",
-        }}
-      >
+        {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
         <div
-          className="relative"
-          style={{ width: `${worldW * zoom}px`, height: `${worldH * zoom}px` }}
+          ref={viewportRef}
+          className="absolute inset-0 overflow-auto scrollbar-rose z-20"
+          style={{
+            scrollbarGutter: "stable",
+          }}
         >
           <div
-            className="absolute left-0 top-0"
+            className="relative"
             style={{
-              width: `${worldW}px`,
-              height: `${worldH}px`,
-              transform: `scale(${zoom})`,
-              transformOrigin: "top left",
-              willChange: "transform",
+              width: `${worldW * zoom}px`,
+              height: `${worldH * zoom}px`,
             }}
           >
-            <NoteHeartsBurst burst={burst} />
+            <div
+              className="absolute left-0 top-0"
+              style={{
+                width: `${worldW}px`,
+                height: `${worldH}px`,
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left",
+                willChange: "transform",
+              }}
+            >
+              <NoteHeartsBurst burst={burst} />
 
-            <Canvas
-              ref={canvasRef}
-              notes={filteredNotes}
-              ownedNoteIds={ownedNoteIds}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseDown={handleMouseDown}
-              onDeleteNote={deleteNote}
-              onOpenNote={handleOpenNote}
-            />
+              <Canvas
+                ref={canvasRef}
+                notes={filteredNotes}
+                ownedNoteIds={ownedNoteIds}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseDown={handleMouseDown}
+                onDeleteNote={deleteNote}
+                onOpenNote={handleOpenNote}
+              />
+            </div>
           </div>
         </div>
+
+        <Toolbar onAddNote={addNote} />
+
+        <ZoomControls
+          zoom={zoom}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={zoomReset}
+        />
+
+        <NoteDetailsModal
+          isOpen={!!selectedNoteId}
+          note={selectedNote}
+          onClose={() => setSelectedNoteId(null)}
+        />
+
+        <CreateNoteModal
+          isOpen={isCreateOpen}
+          isPosting={isPosting}
+          author={draftAuthor}
+          to={draftTo}
+          content={draftContent}
+          selectedColor={draftColor}
+          colors={PASTEL_COLORS}
+          selectedTrack={draftTrack}
+          onAuthorChange={setDraftAuthor}
+          onToChange={setDraftTo}
+          onContentChange={setDraftContent}
+          onColorChange={setDraftColor}
+          onSelectTrack={setDraftTrack}
+          onClose={() => (isPosting ? null : setIsCreateOpen(false))}
+          onCreate={postFromModal}
+        />
+
+        {/* <MusicPlaySection /> */}
       </div>
-
-      <Toolbar onAddNote={addNote} />
-
-      <ZoomControls
-        zoom={zoom}
-        minZoom={MIN_ZOOM}
-        maxZoom={MAX_ZOOM}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        onReset={zoomReset}
-      />
-
-      <NoteDetailsModal
-        isOpen={!!selectedNoteId}
-        note={selectedNote}
-        onClose={() => setSelectedNoteId(null)}
-      />
-
-      <CreateNoteModal
-        isOpen={isCreateOpen}
-        isPosting={isPosting}
-        author={draftAuthor}
-        to={draftTo}
-        content={draftContent}
-        selectedColor={draftColor}
-        colors={PASTEL_COLORS}
-        selectedTrack={draftTrack}
-        onAuthorChange={setDraftAuthor}
-        onToChange={setDraftTo}
-        onContentChange={setDraftContent}
-        onColorChange={setDraftColor}
-        onSelectTrack={setDraftTrack}
-        onClose={() => (isPosting ? null : setIsCreateOpen(false))}
-        onCreate={postFromModal}
-      />
-
-      {/* <MusicPlaySection /> */}
-    </div>
+    </>
   );
 }

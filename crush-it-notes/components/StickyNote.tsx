@@ -209,7 +209,7 @@ export default function StickyNote({
                   href={note.trackSpotifyUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2 py-1 rounded-lg text-[11px] bg-white/70 border border-rose-600/20 hover:bg-rose-50"
+                  className="px-2 py-1 rounded-lg text-[11px] text-rose-300 bg-white/70 border border-rose-600/20 hover:bg-rose-50"
                 >
                   Open
                 </a>
