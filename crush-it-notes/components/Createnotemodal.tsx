@@ -97,193 +97,224 @@ export default function CreateNoteModal({
   if (!isOpen) return null;
 
   return (
-    <div className="absolute inset-0 bg-black/20 backdrop-blur-xs flex items-center justify-center z-50 pointer-events-auto">
-      <div className="bg-white rounded-3xl shadow-2xl p-8 w-[920px] border border-rose-100 max-h-[70vh] overflow-auto scrollbar-hide">
-        <h2 className="text-xl font-bold text-rose-900 mb-4">Create a Note</h2>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/5 backdrop-blur-xs"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !isPosting) onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden transform transition-all duration-500"
+        style={{
+          backgroundColor: selectedColor,
+          transform: "rotate(-0.5deg)",
+        }}
+      >
+        {/* Tape effect at top */}
+        <div className="relative px-6 pt-6 pb-4">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-8 bg-white/30 rounded-b-lg border-t-2 border-white/50 shadow-sm" />
 
-        {/* Two-column layout */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-h-[40%]">
-          {/* LEFT: note info */}
-          <div className="min-w-0">
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <input
-                value={author}
-                onChange={(e) => onAuthorChange(e.target.value)}
-                placeholder="From (optional)"
-                className="w-full p-3 border-2 border-rose-200 rounded-2xl focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
-                disabled={isPosting}
-                style={{ fontFamily: "'Indie Flower', cursive" }}
-              />
-              <input
-                value={to}
-                onChange={(e) => onToChange(e.target.value)}
-                placeholder="To (optional)"
-                className="w-full p-3 border-2 border-rose-200 rounded-2xl focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
-                disabled={isPosting}
-                style={{ fontFamily: "'Indie Flower', cursive" }}
-              />
-            </div>
-
-            <textarea
-              value={content}
-              onChange={(e) => onContentChange(e.target.value)}
-              placeholder="Write your message..."
-              className="w-full h-30 p-4 border-2 border-rose-200 rounded-2xl resize-none focus:outline-none focus:border-rose-400 text-gray-800 placeholder-rose-300"
-              autoFocus
-              disabled={isPosting}
-              style={{ fontFamily: "'Indie Flower', cursive" }}
-            />
-
-            <div className="mt-4">
-              <label className="text-sm font-medium text-rose-900 mb-3 block">
-                Choose a color:
-              </label>
-              <div className="flex gap-2 flex-wrap">
-                {colors.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => onColorChange(color)}
-                    disabled={isPosting}
-                    className="w-8 h-8 rounded-lg transition-transform hover:scale-110 disabled:opacity-60"
-                    style={{
-                      backgroundColor: color,
-                      border:
-                        selectedColor === color
-                          ? "3px solid #e11d48"
-                          : "2px solid #fecdd3",
-                      transform:
-                        selectedColor === color ? "scale(1.1)" : "scale(1)",
-                    }}
-                    aria-label={`Pick color ${color}`}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT: music */}
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-rose-900 mb-2">
-              Attach a song (optional)
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") doSearch();
-                }}
-                placeholder="Search Spotify tracks..."
-                className="flex-1 px-3 py-2 rounded-xl border-2 border-rose-200 outline-none focus:border-rose-400 bg-white text-rose-900 text-sm"
-                disabled={isPosting}
-              />
-              <button
-                type="button"
-                onClick={doSearch}
-                disabled={!canSearch || loading || isPosting}
-                className="px-4 py-2 rounded-xl bg-pink-500 text-white font-semibold disabled:opacity-50"
-              >
-                {loading ? "..." : "Search"}
-              </button>
-            </div>
-
-            {err && <div className="mt-2 text-sm text-rose-700">{err}</div>}
-
-            <div className="mt-2 text-xs text-rose-800/70">
-              Selected: <span className="font-semibold">{selectedLabel}</span>
-              {selectedTrack && (
-                <button
-                  type="button"
-                  onClick={() => onSelectTrack(null)}
-                  disabled={isPosting}
-                  className="ml-2 underline"
-                >
-                  clear
-                </button>
-              )}
-            </div>
-
-            <div className="mt-3 max-h-[200px] overflow-auto flex flex-col gap-2 pr-1 scrollbar-rose">
-              {tracks.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onSelectTrack(t)}
-                  disabled={isPosting}
-                  className="w-full text-left p-2 rounded-xl border border-rose-100 hover:bg-rose-50 disabled:opacity-60 flex items-center gap-3"
-                >
-                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0">
-                    {t.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={t.image}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="text-[10px] text-rose-700/60">No img</div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-rose-900 truncate">
-                      {t.name}
-                    </div>
-                    <div className="text-xs text-rose-800/70 truncate">
-                      {t.artists}
-                      {!t.previewUrl ? " • no preview" : ""}
-                    </div>
-                  </div>
-                </button>
-              ))}
-              {tracks.length === 0 && (
-                <div className="text-sm text-rose-800/60 border border-rose-100 rounded-2xl p-4">
-                  Search for a song to attach it to your note.
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 mt-8">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isPosting}
-                className="flex-1 px-6 py-2 border-2 border-rose-300 text-rose-700 text-sm rounded-xl font-medium hover:bg-rose-50 transition-colors disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={onCreate}
-                disabled={isPosting}
-                className="flex-1 px-6 py-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-sm rounded-xl font-medium hover:scale-105 transition-transform shadow-md disabled:opacity-70 disabled:hover:scale-100"
-              >
-                {isPosting ? "..." : "Post Note ♡"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer buttons */}
-        {/* <div className="flex gap-3 mt-8">
           <button
             type="button"
             onClick={onClose}
             disabled={isPosting}
-            className="flex-1 px-6 py-2 border-2 border-rose-300 text-rose-700 rounded-2xl font-medium hover:bg-rose-50 transition-colors disabled:opacity-60"
+            className="absolute top-3 right-3 w-8 h-8 rounded-full bg-rose-400/80 text-white flex items-center justify-center hover:bg-rose-500 transition-all shadow-md z-10 disabled:opacity-50"
+            title="Close"
           >
-            Cancel
+            ×
           </button>
-          <button
-            type="button"
-            onClick={onCreate}
-            disabled={isPosting}
-            className="flex-1 px-6 py-2 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-2xl font-medium hover:scale-105 transition-transform shadow-md disabled:opacity-70 disabled:hover:scale-100"
-          >
-            {isPosting ? "..." : "Post Note ♡"}
-          </button>
-        </div> */}
+
+          <div className="text-gray-800 font-note text-base leading-tight pt-2">
+            <h2 className="text-2xl font-bold text-rose-900/90 mb-1">
+              Create Your Note
+            </h2>
+            <p className="text-sm text-rose-800/70">
+              Share your message with someone special
+            </p>
+          </div>
+        </div>
+
+        <div className="px-6 pb-6">
+          {/* Two-column grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* LEFT: Note content */}
+            <div className="min-w-0">
+              <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner mb-4">
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <input
+                    value={author}
+                    onChange={(e) => onAuthorChange(e.target.value)}
+                    placeholder="From (optional)"
+                    className="w-full px-3 py-2 border-2 border-rose-200/50 rounded-xl focus:outline-none focus:border-rose-400 bg-white/60 text-gray-800 placeholder-rose-800/60 text-sm font-note"
+                    disabled={isPosting}
+                  />
+                  <input
+                    value={to}
+                    onChange={(e) => onToChange(e.target.value)}
+                    placeholder="To (optional)"
+                    className="w-full px-3 py-2 border-2 border-rose-200/50 rounded-xl focus:outline-none focus:border-rose-400 bg-white/60 text-gray-800 placeholder-rose-800/60 text-sm font-note"
+                    disabled={isPosting}
+                  />
+                </div>
+
+                <textarea
+                  value={content}
+                  onChange={(e) => onContentChange(e.target.value)}
+                  placeholder="Write your message here... ♡"
+                  className="w-full h-32 px-3 py-2 border-2 border-rose-200/50 rounded-xl resize-none focus:outline-none focus:border-rose-400 bg-white/60 text-gray-800 placeholder-rose-800/60 text-sm font-note"
+                  autoFocus
+                  disabled={isPosting}
+                />
+              </div>
+
+              {/* Color picker */}
+              <div className="bg-white/40 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner">
+                <label className="text-sm font-semibold text-rose-900/90 mb-2 block font-note">
+                  Pick a color:
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {colors.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => onColorChange(color)}
+                      disabled={isPosting}
+                      className="w-10 h-10 rounded-xl transition-transform hover:scale-110 disabled:opacity-60 shadow-md"
+                      style={{
+                        backgroundColor: color,
+                        border:
+                          selectedColor === color
+                            ? "3px solid #e11d48"
+                            : "2px solid #fecdd3",
+                        transform:
+                          selectedColor === color ? "scale(1.15)" : "scale(1)",
+                      }}
+                      aria-label={`Pick color ${color}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: Music attachment */}
+            <div className="min-w-0">
+              <div className="bg-white/50 backdrop-blur-sm rounded-2xl p-4 border border-black/5 shadow-inner flex flex-col max-h-[400px]">
+                <div className="text-sm font-semibold text-rose-900/90 mb-3 font-note">
+                  Attach a song (optional)
+                </div>
+
+                <div className="flex gap-2 mb-3">
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") doSearch();
+                    }}
+                    placeholder="Search Spotify..."
+                    className="flex-1 px-3 py-2 rounded-xl border-2 border-rose-200/50 outline-none focus:border-rose-400 bg-white/80 text-rose-900 text-sm font-note placeholder-rose-400/60"
+                    disabled={isPosting}
+                  />
+                  <button
+                    type="button"
+                    onClick={doSearch}
+                    disabled={!canSearch || loading || isPosting}
+                    className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition-colors shadow-md disabled:opacity-50"
+                  >
+                    {loading ? "..." : "Search"}
+                  </button>
+                </div>
+
+                {err && (
+                  <div className="mb-2 text-xs text-rose-700 bg-rose-100/50 rounded-lg px-2 py-1">
+                    {err}
+                  </div>
+                )}
+
+                <div className="mb-2 text-xs text-rose-800/70 bg-white/50 rounded-lg px-2 py-1 flex items-center justify-between shrink-0">
+                  <span className="truncate">
+                    <span className="font-semibold">Selected:</span>{" "}
+                    {selectedLabel}
+                  </span>
+                  {selectedTrack && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectTrack(null)}
+                      disabled={isPosting}
+                      className="ml-2 text-rose-600 hover:text-rose-800 underline"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Track results - scrollable area */}
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col gap-2 pr-1 scrollbar-rose">
+                  {tracks.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onSelectTrack(t)}
+                      disabled={isPosting}
+                      className="w-full text-left p-2 rounded-xl border border-rose-100 bg-white/60 hover:bg-white/90 disabled:opacity-60 flex items-center gap-3 transition-all shadow-sm shrink-0"
+                    >
+                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0 shadow-sm">
+                        {t.image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={t.image}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="text-[10px] text-rose-700/60">
+                            No img
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-rose-900 truncate">
+                          {t.name}
+                        </div>
+                        <div className="text-xs text-rose-800/70 truncate">
+                          {t.artists}
+                          {!t.previewUrl ? " • no preview" : ""}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                  {tracks.length === 0 && (
+                    <div className="text-sm text-rose-800/60 border border-rose-200/50 bg-white/40 rounded-xl p-4 text-center font-note">
+                      Search for a song to attach 🎶
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-3 mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isPosting}
+              className="flex-1 px-6 py-3 border-2 border-white/50 bg-white/30 backdrop-blur-sm text-rose-900 text-sm rounded-xl font-semibold hover:bg-white/50 transition-all disabled:opacity-60 shadow-md"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={isPosting || !content.trim()}
+              className="flex-1 px-6 py-3 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-sm rounded-xl font-semibold hover:scale-105 transition-transform shadow-lg disabled:opacity-50 disabled:hover:scale-100"
+            >
+              {isPosting ? "Posting..." : "Post Note ♡"}
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom shadow line */}
+        <div className="h-3 bg-gradient-to-b from-transparent to-black/5" />
       </div>
     </div>
   );
