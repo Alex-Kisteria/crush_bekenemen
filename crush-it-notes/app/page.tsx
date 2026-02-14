@@ -36,6 +36,7 @@ const NOTE_H = 200;
 
 // Allow up to 2px overlap in BOTH axes; more than that is considered "overlapping too much"
 const MAX_OVERLAP_PX = 2;
+const MAX_OVERLAP_AREA_FRACTION = 0.35;
 
 type CanvasSize = { width: number; height: number };
 type RectPx = { left: number; top: number; right: number; bottom: number };
@@ -51,6 +52,25 @@ function rectsOverlapMoreThan(a: RectPx, b: RectPx, maxOverlapPx: number) {
   const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
   const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
   return overlapX > maxOverlapPx && overlapY > maxOverlapPx;
+}
+
+function rectsOverlapAreaMoreThanFraction(
+  a: RectPx,
+  b: RectPx,
+  maxFraction: number,
+) {
+  const overlapX = Math.max(
+    0,
+    Math.min(a.right, b.right) - Math.max(a.left, b.left),
+  );
+  const overlapY = Math.max(
+    0,
+    Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top),
+  );
+  const overlapArea = overlapX * overlapY;
+
+  const noteArea = NOTE_W * NOTE_H;
+  return overlapArea > noteArea * maxFraction;
 }
 
 function noteToRectPx(note: Note): RectPx {
@@ -72,7 +92,7 @@ function findNonOverlappingPositionPx(
   const fits = (xPx: number, yPx: number) => {
     const rect = candidateToRectPx(xPx, yPx);
     return !existingRects.some((r) =>
-      rectsOverlapMoreThan(rect, r, MAX_OVERLAP_PX),
+      rectsOverlapAreaMoreThanFraction(rect, r, MAX_OVERLAP_AREA_FRACTION),
     );
   };
 
@@ -170,6 +190,12 @@ export default function ValentinesNotesPage() {
       return author.includes(query) || to.includes(query);
     });
   }, [notes, searchQuery]);
+
+  // Tracks latest server updated_at we've applied per note (prevents out-of-order realtime jitter)
+  const lastServerUpdatedAtRef = useRef<Record<string, number>>({});
+
+  // Tracks when we last moved a note locally (during drag). Used to temporarily ignore realtime updates.
+  const lastLocalMoveAtRef = useRef<Record<string, number>>({});
 
   const ownedNoteIds = useMemo(() => {
     const s = new Set<string>();
@@ -323,7 +349,18 @@ export default function ValentinesNotesPage() {
         if (!res.ok) throw new Error(`GET /api/notes failed (${res.status})`);
         const data = (await res.json()) as { notes: ApiNote[] };
         if (cancelled) return;
-        setNotes((data.notes ?? []).map(apiToUi));
+
+        const ui = (data.notes ?? []).map(apiToUi);
+
+        // Initialize server timestamp map from initial load
+        const map: Record<string, number> = {};
+        for (const n of data.notes ?? []) {
+          const t = Date.parse((n.updated_at ?? n.created_at ?? "") as string);
+          if (Number.isFinite(t)) map[n.id] = t;
+        }
+        lastServerUpdatedAtRef.current = map;
+
+        setNotes(ui);
       } catch (e) {
         console.error(e);
       }
@@ -345,6 +382,16 @@ export default function ValentinesNotesPage() {
 
           if (evt === "INSERT") {
             const row = payload.new as any as ApiNote;
+
+            // record latest server timestamp
+            const t = Date.parse(
+              (row.updated_at ?? row.created_at ?? "") as string,
+            );
+            if (Number.isFinite(t)) {
+              const prev = lastServerUpdatedAtRef.current[row.id] ?? 0;
+              if (t > prev) lastServerUpdatedAtRef.current[row.id] = t;
+            }
+
             setNotes((prev) =>
               prev.some((n) => n.id === row.id)
                 ? prev
@@ -356,8 +403,24 @@ export default function ValentinesNotesPage() {
           if (evt === "UPDATE") {
             const row = payload.new as any as ApiNote;
 
-            // Prevent jitter: don't let realtime overwrite the position while we're dragging locally.
+            // 1) Prevent jitter while we're dragging locally.
             if (draggedNoteRef.current === row.id) return;
+
+            // 2) Cooldown: ignore server updates briefly after local move.
+            // This reduces "snap back" when realtime delivers slightly delayed updates.
+            const lastLocal = lastLocalMoveAtRef.current[row.id] ?? 0;
+            if (lastLocal && Date.now() - lastLocal < 450) return;
+
+            // 3) Timestamp ordering: ignore out-of-order realtime updates.
+            const incomingT = Date.parse(
+              (row.updated_at ?? row.created_at ?? "") as string,
+            );
+            const prevT = lastServerUpdatedAtRef.current[row.id] ?? 0;
+
+            if (Number.isFinite(incomingT)) {
+              if (incomingT < prevT) return;
+              lastServerUpdatedAtRef.current[row.id] = incomingT;
+            }
 
             setNotes((prev) =>
               prev.map((n) => (n.id === row.id ? apiToUi(row) : n)),
@@ -367,6 +430,10 @@ export default function ValentinesNotesPage() {
 
           if (evt === "DELETE") {
             const row = payload.old as any as { id: string };
+            // cleanup timestamp maps
+            delete lastServerUpdatedAtRef.current[row.id];
+            delete lastLocalMoveAtRef.current[row.id];
+
             setNotes((prev) => prev.filter((n) => n.id !== row.id));
           }
         },
@@ -396,12 +463,14 @@ export default function ValentinesNotesPage() {
 
     const sendPosition = async (id: string, x: number, y: number) => {
       const token = getEditToken(id);
+      if (!token) return; // only owners can persist moves
+
       try {
         await fetch(`/api/notes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            editToken: token || "guest",
+            editToken: token,
             patch: { x, y },
           }),
         });
@@ -423,11 +492,16 @@ export default function ValentinesNotesPage() {
       const id = draggedNoteRef.current;
       if (!id) return;
 
+      if (!getEditToken(id)) return;
+
       const p = screenToWorld(e.clientX, e.clientY);
       const off = dragOffsetWorldRef.current;
 
       const newX = p.x - off.x;
       const newY = p.y - off.y;
+
+      // mark local movement time (used to suppress jittery realtime UPDATEs)
+      lastLocalMoveAtRef.current[id] = Date.now();
 
       lastPosRef.current = { x: newX, y: newY };
 
@@ -457,8 +531,27 @@ export default function ValentinesNotesPage() {
       }
       flush();
 
+      // Snap to nearest non-overlapping position (prevents "covering")
       const { x, y } = lastPosRef.current;
-      await sendPosition(id, x, y);
+      const others = notesRef.current.filter((n) => n.id !== id);
+      const snapped = findNonOverlappingPositionPx(others, { x, y });
+
+      // mark local movement time again for cooldown right after drop
+      lastLocalMoveAtRef.current[id] = Date.now();
+
+      if (snapped.xPx !== x || snapped.yPx !== y) {
+        setNotes((prev) =>
+          prev.map((n) =>
+            n.id === id ? { ...n, x: snapped.xPx, y: snapped.yPx } : n,
+          ),
+        );
+        await sendPosition(id, snapped.xPx, snapped.yPx);
+      } else {
+        await sendPosition(id, x, y);
+      }
+
+      // Prevent accidental open right after drag
+      lastDragRef.current = { id, at: Date.now() };
     };
 
     window.addEventListener("mousemove", onMove);

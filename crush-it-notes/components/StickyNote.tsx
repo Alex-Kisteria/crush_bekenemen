@@ -101,8 +101,8 @@ export default function StickyNote({
         isVisible ? "blur-0" : "blur-[2px]",
         isVisible ? "" : "shadow-none",
         isVisible ? "pointer-events-auto" : "pointer-events-none",
-        // Everyone can drag now
-        "cursor-move",
+        // Only owners can drag
+        isOwner ? "cursor-move" : "cursor-default",
       ].join(" ")}
       style={{
         left: `${note.x}px`,
@@ -123,7 +123,9 @@ export default function StickyNote({
           time: Date.now(),
         };
 
-        // Allow everyone to drag (removed isOwner check)
+        // Only owners can start a drag
+        if (!isOwner) return;
+
         e.preventDefault();
         onMouseDown(e, note.id);
       }}
