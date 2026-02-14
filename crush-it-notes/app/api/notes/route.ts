@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import crypto from "crypto";
+import { normalizeNoteColor } from "@/lib/noteColors";
 
 function asFiniteNumber(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : (v as number);
@@ -71,9 +72,8 @@ export async function POST(req: Request) {
     author: String(body.author ?? ""),
     to_name: String(body.to_name ?? ""),
     content: String(body.content ?? ""),
-    color: String(body.color ?? "#FFE5E5"),
+    color: normalizeNoteColor(body.color),
 
-    // x/y are now WORLD PIXELS (infinite canvas). Clamp only to prevent absurd values.
     x: clamp(xRaw, -200000, 200000),
     y: clamp(yRaw, -200000, 200000),
 

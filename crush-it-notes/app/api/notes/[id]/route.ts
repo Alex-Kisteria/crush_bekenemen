@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import crypto from "crypto";
+import { cookies } from "next/headers";
+import { adminCookie, isValidAdminCookieValue } from "@/lib/adminSession";
+import { normalizeNoteColor } from "@/lib/noteColors";
 
 function asFiniteNumber(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : (v as number);
@@ -25,6 +28,12 @@ function asTextOrNull(v: unknown, maxLen: number) {
 const NOTE_SELECT =
   "id, author, to_name, content, color, x, y, rotation, track_id, track_name, track_artists, track_image, track_preview_url, track_spotify_url, created_at, updated_at";
 
+async function isAdminRequest() {
+  const cookieStore = await cookies();
+  const v = cookieStore.get(adminCookie.name)?.value;
+  return isValidAdminCookieValue(v);
+}
+
 async function tokenOk(noteId: string, editToken: string) {
   const { data: tokenRow } = await supabaseAdmin
     .from("note_tokens")
@@ -35,7 +44,10 @@ async function tokenOk(noteId: string, editToken: string) {
   return !!tokenRow && tokenRow.token_hash === sha256Hex(editToken);
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
   const { id } = await ctx.params;
 
   const { data, error } = await supabaseAdmin
@@ -48,23 +60,35 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   return NextResponse.json({ note: data });
 }
 
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
   const { id } = await ctx.params;
 
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
+  const admin = await isAdminRequest();
+
   const editToken = String(body.editToken ?? "");
-  if (!editToken) return NextResponse.json({ error: "Missing editToken" }, { status: 400 });
+  if (!admin && !editToken) {
+    return NextResponse.json({ error: "Missing editToken" }, { status: 400 });
+  }
 
   // Accept BOTH payload shapes:
   //  A) { editToken, patch: { x, y } }
   //  B) { editToken, x, y }
+  //  C) (admin) { patch: { x, y } }  OR  { x, y }
   const patch: Record<string, unknown> =
-    body.patch && typeof body.patch === "object" ? (body.patch as Record<string, unknown>) : body;
+    body.patch && typeof body.patch === "object"
+      ? (body.patch as Record<string, unknown>)
+      : (body as Record<string, unknown>);
 
-  if (!(await tokenOk(id, editToken))) {
-    return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  if (!admin) {
+    if (!(await tokenOk(id, editToken))) {
+      return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+    }
   }
 
   const update: Record<string, unknown> = {};
@@ -72,7 +96,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if ("content" in patch) update.content = asTextOrNull(patch.content, 2000);
   if ("author" in patch) update.author = asTextOrNull(patch.author, 120);
   if ("to_name" in patch) update.to_name = asTextOrNull(patch.to_name, 120);
-  if ("color" in patch) update.color = String(patch.color ?? "#FFE5E5");
+  if ("color" in patch) update.color = normalizeNoteColor(patch.color);
 
   if ("x" in patch) {
     const x = asFiniteNumber(patch.x);
@@ -115,16 +139,24 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   return NextResponse.json({ note: data });
 }
 
-export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function DELETE(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
   const { id } = await ctx.params;
 
-  // Your frontend calls: /api/notes/:id?editToken=...
-  const { searchParams } = new URL(req.url);
-  const editToken = String(searchParams.get("editToken") ?? "");
+  const admin = await isAdminRequest();
 
-  if (!editToken) return NextResponse.json({ error: "Missing editToken" }, { status: 400 });
-  if (!(await tokenOk(id, editToken))) {
-    return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+  if (!admin) {
+    const { searchParams } = new URL(req.url);
+    const editToken = String(searchParams.get("editToken") ?? "");
+
+    if (!editToken) {
+      return NextResponse.json({ error: "Missing editToken" }, { status: 400 });
+    }
+    if (!(await tokenOk(id, editToken))) {
+      return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+    }
   }
 
   const { error } = await supabaseAdmin.from("notes").delete().eq("id", id);

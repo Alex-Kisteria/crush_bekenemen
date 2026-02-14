@@ -174,6 +174,59 @@ export default function ValentinesNotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const notesRef = useRef<Note[]>([]);
 
+  // Admin session (server cookie)
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { isAdmin: boolean };
+        if (!cancelled) setIsAdmin(!!data.isAdmin);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = async (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === "A" || e.key === "a")) {
+        const pw = window.prompt("Admin password:");
+        if (!pw) return;
+
+        const res = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pw }),
+        });
+
+        if (res.ok) {
+          setIsAdmin(true);
+          alert("Admin mode enabled on this browser.");
+        } else {
+          alert("Admin login failed.");
+        }
+      }
+
+      if (e.ctrlKey && e.shiftKey && (e.key === "L" || e.key === "l")) {
+        const res = await fetch("/api/admin/logout", { method: "POST" });
+        if (res.ok) {
+          setIsAdmin(false);
+          alert("Admin mode disabled.");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
@@ -198,12 +251,15 @@ export default function ValentinesNotesPage() {
   const lastLocalMoveAtRef = useRef<Record<string, number>>({});
 
   const ownedNoteIds = useMemo(() => {
+    // Admin can drag/delete everything
+    if (isAdmin) return new Set(notes.map((n) => n.id));
+
     const s = new Set<string>();
     for (const n of notes) {
       if (getEditToken(n.id)) s.add(n.id);
     }
     return s;
-  }, [notes]);
+  }, [notes, isAdmin]);
 
   const visibleNoteIds = useMemo(() => {
     if (!searchQuery.trim()) return null;
@@ -562,12 +618,19 @@ export default function ValentinesNotesPage() {
 
     const sendPosition = async (id: string, x: number, y: number) => {
       const token = getEditToken(id);
-      if (!token) return;
+
+      // owner OR admin
+      if (!isAdmin && !token) return;
+
       try {
         await fetch(`/api/notes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ editToken: token, patch: { x, y } }),
+          body: JSON.stringify(
+            isAdmin
+              ? { patch: { x, y } }
+              : { editToken: token, patch: { x, y } },
+          ),
         });
       } catch {
         // ignore
@@ -624,7 +687,8 @@ export default function ValentinesNotesPage() {
       const id = draggedNoteRef.current;
       if (!id) return;
       if (dragPointerIdRef.current !== e.pointerId) return;
-      if (!getEditToken(id)) return;
+
+      if (!isAdmin && !getEditToken(id)) return;
 
       const p = screenToWorld(e.clientX, e.clientY);
       const off = dragOffsetWorldRef.current;
@@ -707,7 +771,7 @@ export default function ValentinesNotesPage() {
       window.removeEventListener("pointercancel", onPointerCancel);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [zoom, MIN_ZOOM, MAX_ZOOM]);
+  }, [zoom, MIN_ZOOM, MAX_ZOOM, isAdmin]);
 
   const keepViewCenteredWhileZooming = (nextZoom: number) => {
     const { w, h } = getViewportSize();
@@ -890,7 +954,9 @@ export default function ValentinesNotesPage() {
 
   const deleteNote = async (noteId: string) => {
     const token = getEditToken(noteId);
-    if (!token) {
+
+    // owner OR admin
+    if (!isAdmin && !token) {
       alert("You can only delete notes you posted on this device/browser.");
       return;
     }
@@ -899,14 +965,14 @@ export default function ValentinesNotesPage() {
     setNotes((p) => p.filter((n) => n.id !== noteId));
 
     try {
-      const res = await fetch(
-        `/api/notes/${noteId}?editToken=${encodeURIComponent(token)}`,
-        {
-          method: "DELETE",
-        },
-      );
+      const url = isAdmin
+        ? `/api/notes/${noteId}`
+        : `/api/notes/${noteId}?editToken=${encodeURIComponent(token!)}`;
+
+      const res = await fetch(url, { method: "DELETE" });
       if (!res.ok) throw new Error(`DELETE failed (${res.status})`);
-      removeEditToken(noteId);
+
+      if (!isAdmin) removeEditToken(noteId);
     } catch (e) {
       console.error(e);
       setNotes(prev);
