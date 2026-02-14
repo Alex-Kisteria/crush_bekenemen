@@ -105,8 +105,8 @@ export default function StickyNote({
         "cursor-move",
       ].join(" ")}
       style={{
-        left: `${note.x}%`,
-        top: `${note.y}%`,
+        left: `${note.x}px`,
+        top: `${note.y}px`,
         backgroundColor: note.color,
         transform: `rotate(${note.rotation}deg) scale(${finalScale}) translateY(${isVisible ? 0 : 8}px)`,
         willChange: "transform, opacity, filter",

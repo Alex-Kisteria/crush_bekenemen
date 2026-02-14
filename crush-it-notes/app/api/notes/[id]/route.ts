@@ -77,13 +77,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if ("x" in patch) {
     const x = asFiniteNumber(patch.x);
     if (x === null) return NextResponse.json({ error: "Invalid x" }, { status: 400 });
-    update.x = clamp(x, 0, 95);
+    update.x = clamp(x, -200000, 200000);
   }
 
   if ("y" in patch) {
     const y = asFiniteNumber(patch.y);
     if (y === null) return NextResponse.json({ error: "Invalid y" }, { status: 400 });
-    update.y = clamp(y, 0, 95);
+    update.y = clamp(y, -200000, 200000);
   }
 
   if ("rotation" in patch) {

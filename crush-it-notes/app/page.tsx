@@ -37,11 +37,11 @@ const NOTE_H = 200;
 // Allow up to 2px overlap in BOTH axes; more than that is considered "overlapping too much"
 const MAX_OVERLAP_PX = 2;
 
+type CanvasSize = { width: number; height: number };
 type RectPx = { left: number; top: number; right: number; bottom: number };
 type NotePatch = Partial<
   Pick<Note, "author" | "to" | "content" | "color" | "x" | "y" | "rotation">
 >;
-type CanvasSize = { width: number; height: number };
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -50,21 +50,13 @@ function clamp(n: number, min: number, max: number) {
 function rectsOverlapMoreThan(a: RectPx, b: RectPx, maxOverlapPx: number) {
   const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
   const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-
-  // If they overlap by more than maxOverlapPx in BOTH directions,
-  // then they overlap too much (area overlap bigger than a thin "stacking" edge).
   return overlapX > maxOverlapPx && overlapY > maxOverlapPx;
 }
 
-function noteToRectPx(note: Note, canvas: CanvasSize): RectPx {
-  const left = (note.x / 100) * canvas.width;
-  const top = (note.y / 100) * canvas.height;
-  return {
-    left,
-    top,
-    right: left + NOTE_W,
-    bottom: top + NOTE_H,
-  };
+function noteToRectPx(note: Note): RectPx {
+  const left = note.x;
+  const top = note.y;
+  return { left, top, right: left + NOTE_W, bottom: top + NOTE_H };
 }
 
 function candidateToRectPx(xPx: number, yPx: number): RectPx {
@@ -73,14 +65,9 @@ function candidateToRectPx(xPx: number, yPx: number): RectPx {
 
 function findNonOverlappingPositionPx(
   existingNotes: Note[],
-  canvas: CanvasSize,
+  start: { x: number; y: number },
 ): { xPx: number; yPx: number } {
-  const maxX = canvas.width - NOTE_W;
-  const maxY = canvas.height - NOTE_H;
-
-  if (maxX <= 0 || maxY <= 0) return { xPx: 0, yPx: 0 };
-
-  const existingRects = existingNotes.map((n) => noteToRectPx(n, canvas));
+  const existingRects = existingNotes.map(noteToRectPx);
 
   const fits = (xPx: number, yPx: number) => {
     const rect = candidateToRectPx(xPx, yPx);
@@ -89,32 +76,24 @@ function findNonOverlappingPositionPx(
     );
   };
 
-  // 1) Try a spiral-ish search around center (feels natural)
-  const centerX = clamp(canvas.width / 2 - NOTE_W / 2, 0, maxX);
-  const centerY = clamp(canvas.height / 2 - NOTE_H / 2, 0, maxY);
+  const STEP = 28;
+  const MAX_R = 2500; // search radius around start (increase if you want)
+  const sx = start.x;
+  const sy = start.y;
 
-  const STEP = 24;
-  const maxR = Math.hypot(canvas.width, canvas.height);
+  if (fits(sx, sy)) return { xPx: sx, yPx: sy };
 
-  if (fits(centerX, centerY)) return { xPx: centerX, yPx: centerY };
-
-  for (let r = STEP; r <= maxR; r += STEP) {
-    for (let k = 0; k < 8; k++) {
-      const angle = (Math.PI * 2 * k) / 8;
-      const x = clamp(centerX + r * Math.cos(angle), 0, maxX);
-      const y = clamp(centerY + r * Math.sin(angle), 0, maxY);
+  for (let r = STEP; r <= MAX_R; r += STEP) {
+    for (let k = 0; k < 16; k++) {
+      const angle = (Math.PI * 2 * k) / 16;
+      const x = sx + r * Math.cos(angle);
+      const y = sy + r * Math.sin(angle);
       if (fits(x, y)) return { xPx: x, yPx: y };
     }
   }
 
-  // 2) Fallback: grid scan (top-left → bottom-right)
-  for (let y = 0; y <= maxY; y += STEP) {
-    for (let x = 0; x <= maxX; x += STEP) {
-      if (fits(x, y)) return { xPx: x, yPx: y };
-    }
-  }
-
-  return { xPx: centerX, yPx: centerY };
+  // fallback
+  return { xPx: sx, yPx: sy };
 }
 
 type ApiNote = {
@@ -226,6 +205,7 @@ export default function ValentinesNotesPage() {
   const [draggedNote, setDraggedNote] = useState<string | null>(null);
   const draggedNoteRef = useRef<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragOffsetWorldRef = useRef({ x: 0, y: 0 });
 
   const dragStartMouseRef = useRef<{ x: number; y: number } | null>(null);
   const didDragMoveRef = useRef(false);
@@ -236,13 +216,73 @@ export default function ValentinesNotesPage() {
 
   // Zoom
   const [zoom, setZoom] = useState(1);
-  const MIN_ZOOM = 0.6;
-  const MAX_ZOOM = 1.8;
+  const MIN_ZOOM = 0.4;
+  const MAX_ZOOM = 2.2;
   const ZOOM_STEP = 0.1;
+
+  // Pan (screen px relative to viewport top-left)
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef(pan);
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const [baseSize, setBaseSize] = useState<CanvasSize>({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // For initializing pan once
+  const didInitPanRef = useRef(false);
+
+  const getViewportSize = () => {
+    const vp = viewportRef.current;
+    return { w: vp?.clientWidth ?? 0, h: vp?.clientHeight ?? 0 };
+  };
+
+  const screenToWorld = (clientX: number, clientY: number) => {
+    const vp = viewportRef.current;
+    if (!vp) return { x: 0, y: 0 };
+
+    const r = vp.getBoundingClientRect();
+    const sx = clientX - r.left; // screen coords inside viewport
+    const sy = clientY - r.top;
+
+    const p = panRef.current;
+    return {
+      x: (sx - p.x) / zoom,
+      y: (sy - p.y) / zoom,
+    };
+  };
+
+  const worldToScreenLocal = (worldX: number, worldY: number) => {
+    const p = panRef.current;
+    return {
+      x: worldX * zoom + p.x,
+      y: worldY * zoom + p.y,
+    };
+  };
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const vp = viewportRef.current;
+      if (!vp) return;
+
+      const r = vp.getBoundingClientRect();
+      const w = Math.round(r.width);
+      const h = Math.round(r.height);
+
+      // init pan so world origin is centered in viewport
+      if (!didInitPanRef.current && w > 0 && h > 0) {
+        setPan({ x: w / 2, y: h / 2 });
+        didInitPanRef.current = true;
+      }
+    };
+
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
   const handleClearSearch = () => {
     setSearchQuery("");
   };
@@ -348,53 +388,46 @@ export default function ValentinesNotesPage() {
     const flush = () => {
       rafId = null;
       if (!pending) return;
+
       const { id, x, y } = pending;
       pending = null;
-
       setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
     };
 
     const sendPosition = async (id: string, x: number, y: number) => {
-      // Try to send position update (will fail silently if not owner)
       const token = getEditToken(id);
-
       try {
         await fetch(`/api/notes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            editToken: token || "guest", // Send placeholder if not owner
+            editToken: token || "guest",
             patch: { x, y },
           }),
         });
       } catch {
-        // Fail silently - note will snap back via realtime if not authorized
+        // ignore
       }
     };
 
     const onMove = (e: MouseEvent) => {
-      const id = draggedNoteRef.current;
-      if (!id || !canvasRef.current) return;
-
-      if (!didDragMoveRef.current && dragStartMouseRef.current) {
-        const dx = e.clientX - dragStartMouseRef.current.x;
-        const dy = e.clientY - dragStartMouseRef.current.y;
-        if (Math.hypot(dx, dy) >= 4) didDragMoveRef.current = true;
+      // Panning
+      if (isPanningRef.current && !draggedNoteRef.current) {
+        const s = panStartRef.current;
+        if (!s) return;
+        setPan({ x: s.x + (e.clientX - s.cx), y: s.y + (e.clientY - s.cy) });
+        return;
       }
 
-      const rect = canvasRef.current.getBoundingClientRect();
-      const off = dragOffsetRef.current;
+      // Dragging a note
+      const id = draggedNoteRef.current;
+      if (!id) return;
 
-      const newX = clamp(
-        ((e.clientX - off.x - rect.left) / rect.width) * 100,
-        0,
-        95,
-      );
-      const newY = clamp(
-        ((e.clientY - off.y - rect.top) / rect.height) * 100,
-        0,
-        95,
-      );
+      const p = screenToWorld(e.clientX, e.clientY);
+      const off = dragOffsetWorldRef.current;
+
+      const newX = p.x - off.x;
+      const newY = p.y - off.y;
 
       lastPosRef.current = { x: newX, y: newY };
 
@@ -409,18 +442,14 @@ export default function ValentinesNotesPage() {
     };
 
     const onUp = async () => {
+      isPanningRef.current = false;
+      panStartRef.current = null;
+
       const id = draggedNoteRef.current;
       if (!id) return;
 
       draggedNoteRef.current = null;
       setDraggedNote(null);
-
-      if (didDragMoveRef.current) {
-        lastDragRef.current = { id, at: Date.now() };
-      }
-
-      didDragMoveRef.current = false;
-      dragStartMouseRef.current = null;
 
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
@@ -439,25 +468,24 @@ export default function ValentinesNotesPage() {
       window.removeEventListener("mouseup", onUp);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, []);
+  }, [zoom]);
 
   const keepViewCenteredWhileZooming = (nextZoom: number) => {
-    const vp = viewportRef.current;
-    if (!vp) return;
+    const { w, h } = getViewportSize();
+    if (!w || !h) return;
 
-    const vw = vp.clientWidth;
-    const vh = vp.clientHeight;
+    const p = panRef.current;
 
-    // current center in "unscaled world pixels"
-    const centerX = (vp.scrollLeft + vw / 2) / zoom;
-    const centerY = (vp.scrollTop + vh / 2) / zoom;
+    // world coord at viewport center before zoom
+    const centerWorldX = (w / 2 - p.x) / zoom;
+    const centerWorldY = (h / 2 - p.y) / zoom;
 
-    // update zoom, then re-center after layout paints
     setZoom(nextZoom);
 
-    requestAnimationFrame(() => {
-      vp.scrollLeft = centerX * nextZoom - vw / 2;
-      vp.scrollTop = centerY * nextZoom - vh / 2;
+    // choose pan so the same world center stays at viewport center
+    setPan({
+      x: w / 2 - centerWorldX * nextZoom,
+      y: h / 2 - centerWorldY * nextZoom,
     });
   };
 
@@ -471,6 +499,29 @@ export default function ValentinesNotesPage() {
     setNotes((prev) =>
       prev.map((n) => (n.id === noteId ? { ...n, ...patch } : n)),
     );
+  };
+
+  // Panning drag
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{
+    x: number;
+    y: number;
+    cx: number;
+    cy: number;
+  } | null>(null);
+
+  const handleViewportMouseDown = (e: React.MouseEvent) => {
+    // start panning only when clicking empty background
+    if (e.button !== 0) return;
+    if (e.target !== e.currentTarget) return;
+
+    isPanningRef.current = true;
+    panStartRef.current = {
+      x: panRef.current.x,
+      y: panRef.current.y,
+      cx: e.clientX,
+      cy: e.clientY,
+    };
   };
 
   const addNote = () => {
@@ -492,13 +543,19 @@ export default function ValentinesNotesPage() {
     const editToken = crypto.randomUUID();
     setEditToken(id, editToken);
 
-    const canvasSize = getCanvasSize();
-    const placement = findNonOverlappingPositionPx(
-      notesRef.current,
-      canvasSize,
-    );
-    const x = clamp((placement.xPx / canvasSize.width) * 100, 0, 95);
-    const y = clamp((placement.yPx / canvasSize.height) * 100, 0, 95);
+    const { w, h } = getViewportSize();
+    const centerWorld = {
+      x: (w / 2 - panRef.current.x) / zoom,
+      y: (h / 2 - panRef.current.y) / zoom,
+    };
+
+    const placement = findNonOverlappingPositionPx(notesRef.current, {
+      x: centerWorld.x - NOTE_W / 2,
+      y: centerWorld.y - NOTE_H / 2,
+    });
+
+    const x = placement.xPx;
+    const y = placement.yPx;
     const rotation = Math.random() * 10 - 5;
 
     try {
@@ -515,7 +572,6 @@ export default function ValentinesNotesPage() {
           x,
           y,
           rotation,
-
           track_id: draftTrack?.id ?? null,
           track_name: draftTrack?.name ?? null,
           track_artists: draftTrack?.artists ?? null,
@@ -525,28 +581,28 @@ export default function ValentinesNotesPage() {
         }),
       });
 
-      if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(`POST /api/notes failed (${res.status}): ${msg}`);
-      }
-
+      if (!res.ok) throw new Error(await res.text().catch(() => "POST failed"));
       const data = (await res.json()) as { note: ApiNote; editToken: string };
 
-      // store token (idempotent)
       if (data.editToken) setEditToken(id, data.editToken);
-
-      // close modal
       setIsCreateOpen(false);
 
-      // local update (realtime will also insert; this avoids waiting)
       setNotes((prev) =>
         prev.some((n) => n.id === data.note.id)
           ? prev
           : [...prev, apiToUi(data.note)],
       );
 
-      setBurst({ xPct: x, yPct: y, key: Date.now() });
-      setTimeout(() => setBurst(null), 800);
+      // Keep burst API as % by converting world->screen->%
+      const local = worldToScreenLocal(x, y);
+      if (w > 0 && h > 0) {
+        setBurst({
+          xPct: (local.x / w) * 100,
+          yPct: (local.y / h) * 100,
+          key: Date.now(),
+        });
+        setTimeout(() => setBurst(null), 800);
+      }
     } catch (e) {
       console.error(e);
       removeEditToken(id);
@@ -711,20 +767,14 @@ export default function ValentinesNotesPage() {
   // };
 
   const handleMouseDown = (e: React.MouseEvent, noteId: string) => {
-    // Remove ownership check - allow everyone to drag
     const note = notesRef.current.find((n) => n.id === noteId);
-    if (!note || !canvasRef.current) return;
+    if (!note) return;
 
-    dragStartMouseRef.current = { x: e.clientX, y: e.clientY };
-    didDragMoveRef.current = false;
+    const p = screenToWorld(e.clientX, e.clientY);
+    dragOffsetWorldRef.current = { x: p.x - note.x, y: p.y - note.y };
 
-    const rect = canvasRef.current.getBoundingClientRect();
-    const noteX = (note.x / 100) * rect.width;
-    const noteY = (note.y / 100) * rect.height;
-
-    dragOffsetRef.current = { x: e.clientX - noteX, y: e.clientY - noteY };
-    setDraggedNote(noteId);
     draggedNoteRef.current = noteId;
+    setDraggedNote(noteId);
   };
 
   const handleOpenNote = (noteId: string) => {
@@ -744,9 +794,22 @@ export default function ValentinesNotesPage() {
   const worldW = baseSize.width > 0 ? baseSize.width : getCanvasSize().width;
   const worldH = baseSize.height > 0 ? baseSize.height : getCanvasSize().height;
 
+  // Visible viewport size (same measurement basis as worldW/worldH)
+  const viewW = worldW;
+  const viewH = worldH;
+
+  // Scroll area should grow when zoom > 1, but should NOT shrink when zoom < 1
+  const scrollW = worldW * Math.max(zoom, 1);
+  const scrollH = worldH * Math.max(zoom, 1);
+
+  // Center the scaled world inside the viewport when zoomed out
+  const offsetX = zoom < 1 ? Math.max(0, (viewW - worldW * zoom) / 2) : 0;
+  const offsetY = zoom < 1 ? Math.max(0, (viewH - worldH * zoom) / 2) : 0;
+
   return (
     <>
       {showIntro && <ValentinesIntro onComplete={() => setShowIntro(false)} />}
+
       <div className="relative w-full h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-red-50">
         <Header />
 
@@ -760,45 +823,34 @@ export default function ValentinesNotesPage() {
 
         <FallingHeartsBackground />
 
-        {/* Scrollable zoom viewport (scrollbars appear when zoom > 1) */}
+        {/* Viewport (captures panning) */}
         <div
           ref={viewportRef}
-          className="absolute inset-0 overflow-auto scrollbar-rose z-20"
-          style={{
-            scrollbarGutter: "stable",
-          }}
+          className="absolute inset-0 overflow-hidden z-20"
+          onMouseDown={handleViewportMouseDown}
         >
+          {/* World layer */}
           <div
-            className="relative"
+            className="absolute inset-0"
             style={{
-              width: `${worldW * zoom}px`,
-              height: `${worldH * zoom}px`,
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: "0 0",
+              willChange: "transform",
             }}
           >
-            <div
-              className="absolute left-0 top-0"
-              style={{
-                width: `${worldW}px`,
-                height: `${worldH}px`,
-                transform: `scale(${zoom})`,
-                transformOrigin: "top left",
-                willChange: "transform",
-              }}
-            >
-              <NoteHeartsBurst burst={burst} />
+            <NoteHeartsBurst burst={burst} />
 
-              <Canvas
-                ref={canvasRef}
-                notes={notes}
-                ownedNoteIds={ownedNoteIds}
-                visibleNoteIds={visibleNoteIds}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseDown={handleMouseDown}
-                onDeleteNote={deleteNote}
-                onOpenNote={handleOpenNote}
-              />
-            </div>
+            <Canvas
+              ref={canvasRef}
+              notes={notes}
+              ownedNoteIds={ownedNoteIds}
+              visibleNoteIds={visibleNoteIds}
+              onMouseMove={() => {}}
+              onMouseUp={() => {}}
+              onMouseDown={handleMouseDown}
+              onDeleteNote={deleteNote}
+              onOpenNote={handleOpenNote}
+            />
           </div>
         </div>
 
@@ -836,8 +888,6 @@ export default function ValentinesNotesPage() {
           onClose={() => (isPosting ? null : setIsCreateOpen(false))}
           onCreate={postFromModal}
         />
-
-        {/* <MusicPlaySection /> */}
       </div>
     </>
   );
