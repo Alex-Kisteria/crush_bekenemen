@@ -7,7 +7,7 @@ interface StickyNoteProps {
   note: Note;
   isOwner: boolean;
   isVisible: boolean;
-  onMouseDown: (e: React.MouseEvent, noteId: string) => void;
+  onPointerDown: (e: React.PointerEvent, noteId: string) => void;
   onDelete: (noteId: string) => void;
   onOpen: (noteId: string) => void;
 }
@@ -16,7 +16,7 @@ export default function StickyNote({
   note,
   isOwner,
   isVisible,
-  onMouseDown,
+  onPointerDown,
   onDelete,
   onOpen,
 }: StickyNoteProps) {
@@ -101,7 +101,6 @@ export default function StickyNote({
         isVisible ? "blur-0" : "blur-[2px]",
         isVisible ? "" : "shadow-none",
         isVisible ? "pointer-events-auto" : "pointer-events-none",
-        // Only owners can drag
         isOwner ? "cursor-move" : "cursor-default",
       ].join(" ")}
       style={{
@@ -111,9 +110,11 @@ export default function StickyNote({
         transform: `rotate(${note.rotation}deg) scale(${finalScale}) translateY(${isVisible ? 0 : 8}px)`,
         willChange: "transform, opacity, filter",
         filter: isVisible ? "none" : "blur(2px) saturate(0.4) brightness(0.9)",
+        // Important for mobile dragging/panning
+        touchAction: "none",
       }}
       aria-hidden={!isVisible}
-      onMouseDown={(e) => {
+      onPointerDown={(e) => {
         if (!isVisible) return;
         if (isInteractiveTarget(e.target)) return;
 
@@ -123,13 +124,21 @@ export default function StickyNote({
           time: Date.now(),
         };
 
-        // Only owners can start a drag
         if (!isOwner) return;
 
+        // Prevent page scroll / browser gesture
         e.preventDefault();
-        onMouseDown(e, note.id);
+
+        // Helps keep receiving move events even if finger leaves the note
+        try {
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+
+        onPointerDown(e, note.id);
       }}
-      onMouseUp={(e) => {
+      onPointerUp={(e) => {
         if (!isVisible) return;
         if (isInteractiveTarget(e.target)) return;
 
@@ -143,9 +152,7 @@ export default function StickyNote({
 
         if (distance < 8 && dt < 300) {
           doPluck();
-          window.setTimeout(() => {
-            onOpen(note.id);
-          }, 400);
+          window.setTimeout(() => onOpen(note.id), 400);
         }
 
         clickStartRef.current = null;
@@ -154,7 +161,7 @@ export default function StickyNote({
       {/* Delete button only visible for owners */}
       {isOwner && (
         <button
-          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onDelete(note.id);
@@ -176,7 +183,16 @@ export default function StickyNote({
           </div>
         </div>
 
-        <div className="text-gray-800 text-sm whitespace-pre-wrap break-words overflow-auto font-note flex-1">
+        <div
+          className={[
+            "text-gray-800 text-sm font-note flex-1 min-h-0",
+            "whitespace-pre-wrap break-words",
+            "overflow-hidden",
+            // multi-line ellipsis (Tailwind line-clamp plugin if enabled)
+            "line-clamp-6",
+          ].join(" ")}
+          title={note.content}
+        >
           {note.content}
         </div>
 
@@ -196,7 +212,7 @@ export default function StickyNote({
                 <>
                   <button
                     type="button"
-                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
                       void togglePlay();
@@ -219,7 +235,7 @@ export default function StickyNote({
 
               {note.trackSpotifyUrl && (
                 <a
-                  onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   href={note.trackSpotifyUrl}
                   target="_blank"
