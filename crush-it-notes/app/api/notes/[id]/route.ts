@@ -4,6 +4,9 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { adminCookie, isValidAdminCookieValue } from "@/lib/adminSession";
 import { normalizeNoteColor } from "@/lib/noteColors";
+import { normalizeRotation } from "@/lib/notePolicy";
+
+export const runtime = "nodejs";
 
 function asFiniteNumber(v: unknown): number | null {
   const n = typeof v === "string" ? Number(v) : (v as number);
@@ -111,9 +114,7 @@ export async function PATCH(
   }
 
   if ("rotation" in patch) {
-    const r = asFiniteNumber(patch.rotation);
-    if (r === null) return NextResponse.json({ error: "Invalid rotation" }, { status: 400 });
-    update.rotation = r;
+    update.rotation = normalizeRotation(patch.rotation);
   }
 
   // Music fields
